@@ -1,0 +1,6 @@
+@GMAO.API_HostAddress = http://localhost:5151
+
+GET {{GMAO.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
