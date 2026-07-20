@@ -100,10 +100,17 @@ app.UseAuthorization();
 app.MapControllers();
 
 // ── Auto-migration et Seeding au démarrage ───────────────────
+try
 {
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<GmaoDbContext>();
     db.Database.Migrate();
+    Console.WriteLine("✅ Database migration completed successfully.");
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"⚠️ Database migration failed: {ex.Message}");
+    Console.WriteLine("The application will continue without migration.");
 }
 
 app.Run();
