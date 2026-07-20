@@ -37,6 +37,12 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
               .HasForeignKey(u => u.RoleId)
               .OnDelete(DeleteBehavior.Restrict);
 
+        // ── User → Societe (Many-to-One) ─────────────────────────────────────
+        entity.HasOne(u => u.Societe)
+              .WithMany(s => s.Users)
+              .HasForeignKey(u => u.SocieteId)
+              .OnDelete(DeleteBehavior.SetNull);
+
         // ── User → DemandesIntervention (One-to-Many) ────────────────────────
         entity.HasMany(u => u.DemandesIntervention)
               .WithOne(d => d.Demandeur)

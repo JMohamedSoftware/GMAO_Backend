@@ -91,7 +91,7 @@ app.UseAuthorization();
 
 app.MapControllers();
 
-// ── Auto-migration au démarrage (développement uniquement) ───────────────────
+// ── Auto-migration et Seeding au démarrage ───────────────────
 if (app.Environment.IsDevelopment())
 {
     using var scope = app.Services.CreateScope();

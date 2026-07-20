@@ -1,8 +1,10 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\GMAO.Domain\GMAO.Domain.csproj" />
   </ItemGroup>
+
+
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>

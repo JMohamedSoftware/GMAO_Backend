@@ -10,6 +10,7 @@ public class GmaoDbContext : DbContext
 
     // ── Auth & Utilisateurs ─────────────────────────────────────────────────
     public DbSet<Role> Roles { get; set; }
+    public DbSet<Societe> Societes { get; set; }
     public DbSet<User> Users { get; set; }
     public DbSet<RefreshToken> RefreshTokens { get; set; }
     public DbSet<Competence> Competences { get; set; }
@@ -59,6 +60,7 @@ public class GmaoDbContext : DbContext
         SeedFamilles(modelBuilder);
         SeedFamillesPieces(modelBuilder);
         SeedCompetences(modelBuilder);
+        SeedSocietes(modelBuilder);
         SeedUsers(modelBuilder);
     }
 
@@ -112,6 +114,20 @@ public class GmaoDbContext : DbContext
         );
     }
 
+    private static void SeedSocietes(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Societe>().HasData(
+            new Societe 
+            { 
+                Id = 1, 
+                CodeTenant = "tenant-midi", 
+                Nom = "Conserverie du Midi S.A.", 
+                EmailContact = "admin@midi.com",
+                CreatedAt = new DateTime(2026, 1, 10, 12, 0, 0, DateTimeKind.Utc)
+            }
+        );
+    }
+
     private static void SeedUsers(ModelBuilder modelBuilder)
     {
         // Mot de passe par défaut: "admin", hashé en SHA-256
@@ -125,6 +141,7 @@ public class GmaoDbContext : DbContext
                 PasswordHash = "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",
                 Telephone = "+21699999999",
                 RoleId = 1, // Admin
+                SocieteId = 1, // tenant-midi
                 IsActive = true,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             }
