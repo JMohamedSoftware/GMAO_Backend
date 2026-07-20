@@ -55,11 +55,19 @@ builder.Services.AddEndpointsApiExplorer();
 
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
+var allowedOrigins = new List<string>
+{
+    "http://localhost:3000", "http://localhost:5173", "http://localhost:4200"
+};
+var frontendUrl = Environment.GetEnvironmentVariable("FRONTEND_URL");
+if (!string.IsNullOrEmpty(frontendUrl))
+    allowedOrigins.Add(frontendUrl.TrimEnd('/'));
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("GmaoPolicy", policy =>
     {
-        policy.WithOrigins("http://localhost:3000", "http://localhost:5173", "http://localhost:4200")
+        policy.WithOrigins(allowedOrigins.ToArray())
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();
@@ -92,7 +100,6 @@ app.UseAuthorization();
 app.MapControllers();
 
 // ── Auto-migration et Seeding au démarrage ───────────────────
-if (app.Environment.IsDevelopment())
 {
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<GmaoDbContext>();
