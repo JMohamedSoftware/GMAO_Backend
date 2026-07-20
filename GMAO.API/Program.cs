@@ -61,8 +61,9 @@ builder.Services.AddCors(options =>
     {
         policy.SetIsOriginAllowed(_ => true)
               .AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials();
+              .AllowAnyMethod();
+              // Note: AllowCredentials() removed — incompatible with wildcard origin
+              // JWT is sent in Authorization header, not cookies, so not needed
     });
 });
 
