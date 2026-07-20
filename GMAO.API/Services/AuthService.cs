@@ -174,7 +174,9 @@ public class AuthService : IAuthService
 
     private UserProfileDto MapToDto(User user)
     {
-        if (user.Societe == null)
+        var roleName = user.Role?.Nom ?? "Utilisateur";
+
+        if (user.Societe == null && roleName != "SuperAdmin")
             throw new Exception("Cet utilisateur n'est rattaché à aucune société.");
 
         return new UserProfileDto
@@ -182,9 +184,9 @@ public class AuthService : IAuthService
             Id = user.Id,
             Email = user.Email,
             Name = $"{user.Prenom} {user.Nom}",
-            Role = user.Role?.Nom ?? "Utilisateur",
-            TenantId = user.Societe.CodeTenant,
-            TenantName = user.Societe.Nom,
+            Role = roleName,
+            TenantId = user.Societe?.CodeTenant ?? "platform",
+            TenantName = user.Societe?.Nom ?? "Plateforme GMAO",
             IsActive = user.IsActive,
             CreatedAt = user.CreatedAt.ToString("o")
         };
