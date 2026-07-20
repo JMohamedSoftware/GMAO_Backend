@@ -67,12 +67,13 @@ public class GmaoDbContext : DbContext
     private static void SeedRoles(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Role>().HasData(
-            new Role { Id = 1, Nom = "Admin", Description = "Administrateur système avec accès total" },
+            new Role { Id = 1, Nom = "Admin",                Description = "Administrateur d'une société avec accès complet sur son périmètre" },
             new Role { Id = 2, Nom = "Responsable Maintenance", Description = "Gestion des OT, validation des demandes et rapports" },
-            new Role { Id = 3, Nom = "Chef Equipe", Description = "Supervision des techniciens et suivi des OT" },
-            new Role { Id = 4, Nom = "Technicien", Description = "Exécution des interventions" },
-            new Role { Id = 5, Nom = "Production", Description = "Déclaration des pannes" },
-            new Role { Id = 6, Nom = "Magasinier", Description = "Gestion du stock de pièces de rechange" }
+            new Role { Id = 3, Nom = "Chef Equipe",          Description = "Supervision des techniciens et suivi des OT" },
+            new Role { Id = 4, Nom = "Technicien",           Description = "Exécution des interventions" },
+            new Role { Id = 5, Nom = "Production",           Description = "Déclaration des pannes" },
+            new Role { Id = 6, Nom = "Magasinier",           Description = "Gestion du stock de pièces de rechange" },
+            new Role { Id = 7, Nom = "SuperAdmin",           Description = "Administrateur plateforme - gère toutes les sociétés" }
         );
     }
 
@@ -135,13 +136,13 @@ public class GmaoDbContext : DbContext
             new User
             {
                 Id = 1,
-                Nom = "Admin",
-                Prenom = "GMAO",
-                Email = "admin@tomate.com",
-                PasswordHash = "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",
+                Nom = "Super",
+                Prenom = "Admin",
+                Email = "superadmin@gmao.com",
+                PasswordHash = "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918", // "admin"
                 Telephone = "+21699999999",
-                RoleId = 1, // Admin
-                SocieteId = 1, // tenant-midi
+                RoleId = 7,          // SuperAdmin
+                SocieteId = null,    // N'appartient à aucune société
                 IsActive = true,
                 CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             }

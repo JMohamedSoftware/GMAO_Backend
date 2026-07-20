@@ -33,7 +33,7 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
 
         // ── User → Role (Many-to-One) ────────────────────────────────────────
         entity.HasOne(u => u.Role)
-              .WithMany()
+              .WithMany(r => r.Users)   // Fix: évite le shadow FK 'RoleId1'
               .HasForeignKey(u => u.RoleId)
               .OnDelete(DeleteBehavior.Restrict);
 
