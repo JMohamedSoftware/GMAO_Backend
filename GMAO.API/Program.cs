@@ -55,19 +55,11 @@ builder.Services.AddEndpointsApiExplorer();
 
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
-var allowedOrigins = new List<string>
-{
-    "http://localhost:3000", "http://localhost:5173", "http://localhost:4200"
-};
-var frontendUrl = Environment.GetEnvironmentVariable("FRONTEND_URL");
-if (!string.IsNullOrEmpty(frontendUrl))
-    allowedOrigins.Add(frontendUrl.TrimEnd('/'));
-
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("GmaoPolicy", policy =>
     {
-        policy.WithOrigins(allowedOrigins.ToArray())
+        policy.SetIsOriginAllowed(_ => true)
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();
