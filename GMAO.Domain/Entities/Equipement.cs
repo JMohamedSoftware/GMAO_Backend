@@ -5,6 +5,7 @@ namespace GMAO.Domain.Entities;
 public class Equipement
 {
     public int Id { get; set; }
+    public int SocieteId { get; set; }          // Multi-tenant: each company owns its equipments
     public string Code { get; set; } = string.Empty;
     public string Designation { get; set; } = string.Empty;
     public int FamilleId { get; set; }
@@ -24,6 +25,7 @@ public class Equipement
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
+    public Societe Societe { get; set; } = null!;
     public Famille Famille { get; set; } = null!;
     public Localisation Localisation { get; set; } = null!;
     public Fournisseur? Fournisseur { get; set; }
