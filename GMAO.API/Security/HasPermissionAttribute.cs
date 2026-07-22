@@ -18,40 +18,23 @@ public class HasPermissionAttribute : Attribute, IAsyncActionFilter
 
     public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
     {
-        var dbContext = context.HttpContext.RequestServices.GetService<GmaoDbContext>();
-        
-        var userIdString = context.HttpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (string.IsNullOrEmpty(userIdString) || !int.TryParse(userIdString, out var userId))
+        var user = context.HttpContext.User;
+
+        if (!user.Identity?.IsAuthenticated ?? true)
         {
             context.Result = new UnauthorizedResult();
             return;
         }
 
-        if (dbContext == null)
-        {
-             context.Result = new StatusCodeResult(500);
-             return;
-        }
-
-        var user = await dbContext.Users
-            .Include(u => u.Role)
-                .ThenInclude(r => r.RolePermissions)
-            .FirstOrDefaultAsync(u => u.Id == userId);
-
-        if (user == null || user.Role == null)
-        {
-            context.Result = new UnauthorizedResult();
-            return;
-        }
-
-        // SuperAdmin can do everything
-        if (user.Role.Nom == "SuperAdmin")
+        // SuperAdmin and Admin can do everything
+        if (user.HasClaim(ClaimTypes.Role, "SuperAdmin") || user.IsInRole("SuperAdmin") ||
+            user.HasClaim(ClaimTypes.Role, "Admin") || user.IsInRole("Admin"))
         {
             await next();
             return;
         }
 
-        var hasPermission = user.Role.RolePermissions.Any(rp => rp.PermissionName == _permission);
+        var hasPermission = user.HasClaim("Permission", _permission);
         if (!hasPermission)
         {
             context.Result = new ForbidResult();

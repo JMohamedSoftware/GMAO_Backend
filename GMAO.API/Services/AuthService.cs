@@ -74,8 +74,10 @@ public class AuthService : IAuthService
         rt.IsRevoked = true;
         await _refreshTokenRepository.UpdateAsync(rt);
 
+        var fullUser = await _userRepository.GetByEmailAsync(user.Email);
+
         // Generate new tokens
-        var newAccessToken = GenerateJwtToken(user);
+        var newAccessToken = GenerateJwtToken(fullUser ?? user);
         var newRefreshToken = GenerateRefreshToken();
 
         var newRt = new RefreshToken
@@ -86,9 +88,6 @@ public class AuthService : IAuthService
         };
 
         await _refreshTokenRepository.AddAsync(newRt);
-
-        // Map user with roles via GetByEmail since GetById might not include Roles natively if not configured
-        var fullUser = await _userRepository.GetByEmailAsync(user.Email);
 
         return new AuthResponseDto
         {
@@ -153,6 +152,14 @@ public class AuthService : IAuthService
             new Claim("name", $"{user.Prenom} {user.Nom}"),
             new Claim("SocieteId", user.SocieteId?.ToString() ?? "")
         };
+
+        if (user.Role?.RolePermissions != null)
+        {
+            foreach (var perm in user.Role.RolePermissions)
+            {
+                claims.Add(new Claim("Permission", perm.PermissionName));
+            }
+        }
 
         var token = new JwtSecurityToken(
             issuer: jwtSettings["Issuer"],
