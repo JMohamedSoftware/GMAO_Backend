@@ -16,6 +16,7 @@ public class UserRepository : GenericRepository<User>, IUserRepository
     {
         return await _context.Users
             .Include(u => u.Role)
+                .ThenInclude(r => r.RolePermissions)
             .Include(u => u.Societe)
             .Include(u => u.TechnicienCompetences)
                 .ThenInclude(tc => tc.Competence)

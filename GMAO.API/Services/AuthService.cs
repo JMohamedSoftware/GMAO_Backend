@@ -189,7 +189,8 @@ public class AuthService : IAuthService
             TenantId = user.Societe?.CodeTenant ?? "platform",
             TenantName = user.Societe?.Nom ?? "Plateforme GMAO",
             IsActive = user.IsActive,
-            CreatedAt = user.CreatedAt.ToString("o")
+            CreatedAt = user.CreatedAt.ToString("o"),
+            Permissions = user.Role?.RolePermissions.Select(rp => rp.PermissionName).ToList() ?? new List<string>()
         };
     }
 }

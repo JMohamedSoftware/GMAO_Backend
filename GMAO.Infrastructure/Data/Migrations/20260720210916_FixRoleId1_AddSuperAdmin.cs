@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
@@ -71,10 +71,7 @@ namespace GMAO.Infrastructure.Data.Migrations
                 column: "Description",
                 value: "Administrateur d'une société avec accès complet sur son périmètre");
 
-            migrationBuilder.InsertData(
-                table: "Roles",
-                columns: new[] { "Id", "Description", "Nom" },
-                values: new object[] { 7, "Administrateur plateforme - gère toutes les sociétés", "SuperAdmin" });
+
 
             migrationBuilder.UpdateData(
                 table: "Users",
