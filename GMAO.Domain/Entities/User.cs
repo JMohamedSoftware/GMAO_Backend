@@ -17,7 +17,7 @@ public class User
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    public Role Role { get; set; } = null!;
+    public Role? Role { get; set; }
     public Societe? Societe { get; set; }
     public ICollection<DemandeIntervention> DemandesIntervention { get; set; } = new List<DemandeIntervention>();
     public ICollection<OrdresTravail> OrdresTravailResponsable { get; set; } = new List<OrdresTravail>();
