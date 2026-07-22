@@ -6,10 +6,14 @@ using GMAO.Domain.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using System.Linq;
 
+using Microsoft.AspNetCore.Authorization;
+using System.Security.Claims;
+
 namespace GMAO.API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class UsersController : ControllerBase
 {
     private readonly IAuthService _authService;
@@ -31,6 +35,13 @@ public class UsersController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> CreateUser([FromBody] RegisterDto dto)
     {
+        // Forcer le SocieteId de l'admin connecté
+        var societeIdClaim = User.FindFirst("SocieteId")?.Value;
+        if (!string.IsNullOrEmpty(societeIdClaim) && int.TryParse(societeIdClaim, out int societeId))
+        {
+            dto.User.SocieteId = societeId;
+        }
+
         if (dto.CompetenceIds != null && dto.CompetenceIds.Any())
         {
             foreach (var compId in dto.CompetenceIds)
