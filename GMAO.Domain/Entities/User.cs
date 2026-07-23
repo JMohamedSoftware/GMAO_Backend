@@ -10,6 +10,8 @@ public class User
     public string? Telephone { get; set; }
     public int RoleId { get; set; }
     
+    public string? Avatar { get; set; }
+
     // The company the user belongs to
     public int? SocieteId { get; set; }
     
