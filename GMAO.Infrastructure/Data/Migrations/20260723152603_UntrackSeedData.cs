@@ -11,9 +11,15 @@ namespace GMAO.Infrastructure.Data.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            // Intentionally left blank.
-            // We want EF Core to stop tracking the Seed data, 
-            // but we DO NOT want to delete the actual records from the database.
+            migrationBuilder.DeleteData(
+                table: "Societes",
+                keyColumn: "Id",
+                keyValue: 1);
+
+            migrationBuilder.DeleteData(
+                table: "Users",
+                keyColumn: "Id",
+                keyValue: 1);
         }
 
         /// <inheritdoc />
