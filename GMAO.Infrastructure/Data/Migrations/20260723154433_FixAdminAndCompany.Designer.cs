@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace GMAO.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(GmaoDbContext))]
-    [Migration("20260723152603_UntrackSeedData")]
-    partial class UntrackSeedData
+    [Migration("20260723154433_FixAdminAndCompany")]
+    partial class FixAdminAndCompany
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)

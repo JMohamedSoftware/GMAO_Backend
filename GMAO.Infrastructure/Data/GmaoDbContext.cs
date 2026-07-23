@@ -61,8 +61,6 @@ public class GmaoDbContext : DbContext
         SeedFamilles(modelBuilder);
         SeedFamillesPieces(modelBuilder);
         SeedCompetences(modelBuilder);
-        SeedSocietes(modelBuilder);
-        SeedUsers(modelBuilder);
     }
 
     private static void SeedRoles(ModelBuilder modelBuilder)
@@ -113,40 +111,6 @@ public class GmaoDbContext : DbContext
             new Competence { Id = 3, Nom = "Automaticien", Description = "Programmation API Siemens, Schneider, automates et capteurs" },
             new Competence { Id = 4, Nom = "Soudeur", Description = "Soudure tuyauterie inox et structures métalliques" },
             new Competence { Id = 5, Nom = "Mécanicien", Description = "Maintenance mécanique lourde, réducteurs, convoyeurs" }
-        );
-    }
-
-    private static void SeedSocietes(ModelBuilder modelBuilder)
-    {
-        modelBuilder.Entity<Societe>().HasData(
-            new Societe
-            {
-                Id = 1,
-                CodeTenant = "tenant-midi",
-                Nom = "cicam",
-                EmailContact = "cicam@midi.com",
-                IsActive = true,
-                CreatedAt = new DateTime(2026, 1, 10, 12, 0, 0, DateTimeKind.Utc)
-            }
-        );
-    }
-
-    private static void SeedUsers(ModelBuilder modelBuilder)
-    {
-        modelBuilder.Entity<User>().HasData(
-            new User
-            {
-                Id = 1,
-                Nom = "Super",
-                Prenom = "Admin",
-                Email = "superadmin@gmao.com",
-                PasswordHash = "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",
-                Telephone = "+21699999999",
-                RoleId = 7,
-                SocieteId = null,
-                IsActive = true,
-                CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
-            }
         );
     }
 }

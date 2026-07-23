@@ -1086,17 +1086,6 @@ namespace GMAO.Infrastructure.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("Societes", (string)null);
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            CodeTenant = "tenant-midi",
-                            CreatedAt = new DateTime(2026, 1, 10, 12, 0, 0, 0, DateTimeKind.Utc),
-                            EmailContact = "cicam@midi.com",
-                            IsActive = true,
-                            Nom = "cicam"
-                        });
                 });
 
             modelBuilder.Entity("GMAO.Domain.Entities.TachePreventive", b =>
@@ -1202,20 +1191,6 @@ namespace GMAO.Infrastructure.Data.Migrations
                     b.HasIndex("SocieteId");
 
                     b.ToTable("Users", (string)null);
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Email = "superadmin@gmao.com",
-                            IsActive = true,
-                            Nom = "Super",
-                            PasswordHash = "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",
-                            Prenom = "Admin",
-                            RoleId = 7,
-                            Telephone = "+21699999999"
-                        });
                 });
 
             modelBuilder.Entity("GMAO.Domain.Entities.DemandeIntervention", b =>
