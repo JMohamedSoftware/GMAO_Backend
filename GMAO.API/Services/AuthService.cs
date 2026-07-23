@@ -132,6 +132,12 @@ public class AuthService : IAuthService
 
     public async Task<User> RegisterAsync(User user, string password)
     {
+        var existingUser = await _userRepository.GetByEmailAsync(user.Email);
+        if (existingUser != null)
+        {
+            throw new Exception("L'email est déjà utilisé.");
+        }
+        
         user.PasswordHash = PasswordHasher.HashPassword(password);
         await _userRepository.AddAsync(user);
         return user;

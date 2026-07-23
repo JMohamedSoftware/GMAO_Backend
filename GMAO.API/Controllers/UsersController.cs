@@ -35,24 +35,32 @@ public class UsersController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> CreateUser([FromBody] RegisterDto dto)
     {
-        // Forcer le SocieteId de l'admin connecté
-        var societeIdClaim = User.FindFirst("SocieteId")?.Value;
-        if (!string.IsNullOrEmpty(societeIdClaim) && int.TryParse(societeIdClaim, out int societeId))
+        try
         {
-            dto.User.SocieteId = societeId;
-        }
-
-        if (dto.CompetenceIds != null && dto.CompetenceIds.Any())
-        {
-            foreach (var compId in dto.CompetenceIds)
+            // Forcer le SocieteId de l'admin connecté
+            var societeIdClaim = User.FindFirst("SocieteId")?.Value;
+            if (!string.IsNullOrEmpty(societeIdClaim) && int.TryParse(societeIdClaim, out int societeId))
             {
-                dto.User.TechnicienCompetences.Add(new TechnicienCompetence 
-                { 
-                    CompetenceId = compId 
-                });
+                dto.User.SocieteId = societeId;
             }
+
+            if (dto.CompetenceIds != null && dto.CompetenceIds.Any())
+            {
+                foreach (var compId in dto.CompetenceIds)
+                {
+                    dto.User.TechnicienCompetences.Add(new TechnicienCompetence 
+                    { 
+                        CompetenceId = compId 
+                    });
+                }
+            }
+            
+            var user = await _authService.RegisterAsync(dto.User, dto.Password);
+            return Ok(user);
         }
-        
-        return Ok(await _authService.RegisterAsync(dto.User, dto.Password));
+        catch (System.Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 }
