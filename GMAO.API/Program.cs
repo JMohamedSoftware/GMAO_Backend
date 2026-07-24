@@ -62,11 +62,14 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("GmaoPolicy", policy =>
     {
-        policy.SetIsOriginAllowed(_ => true)
-              .AllowAnyHeader()
-              .AllowAnyMethod();
-              // Note: AllowCredentials() removed — incompatible with wildcard origin
-              // JWT is sent in Authorization header, not cookies, so not needed
+        policy.WithOrigins(
+            "http://localhost:5173", 
+            "https://gmao-frontend.vercel.app", 
+            "https://g-m-a-o.vercel.app",
+            "https://gmao-saas.com" // future domain
+        )
+        .AllowAnyHeader()
+        .AllowAnyMethod();
     });
 });
 
