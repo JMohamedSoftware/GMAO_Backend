@@ -22,23 +22,35 @@ public class OrdreTravailRepository : GenericRepository<OrdresTravail>, IOrdreTr
     {
         var query = _context.Set<OrdresTravail>().AsQueryable();
 
-        // Enforce Row-Level Security
-        if (!user.HasClaim(System.Security.Claims.ClaimTypes.Role, "SuperAdmin") && 
-            !user.HasClaim(System.Security.Claims.ClaimTypes.Role, "Admin"))
+        // Enforce Row-Level Security using Scoped Permissions
+        if (user.HasClaim(System.Security.Claims.ClaimTypes.Role, "SuperAdmin") || 
+            user.HasClaim(System.Security.Claims.ClaimTypes.Role, "Administrateur") ||
+            user.HasClaim(System.Security.Claims.ClaimTypes.Role, "CompanyAdmin"))
         {
-            var userIdString = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-            if (int.TryParse(userIdString, out var userId))
-            {
-                // Technicians can only see their own work orders
-                query = query.Where(ot => ot.TechnicienId == userId);
-            }
-            else
-            {
-                // Unauthenticated or invalid user ID gets nothing
-                return new System.Collections.Generic.List<OrdresTravail>();
-            }
+            return await query.ToListAsync();
         }
 
-        return await query.ToListAsync();
+        var userIdString = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (!int.TryParse(userIdString, out var userId))
+        {
+            // Unauthenticated or invalid user ID gets nothing
+            return new System.Collections.Generic.List<OrdresTravail>();
+        }
+
+        // Check for specific scopes
+        if (user.HasClaim("Permission", "WORKORDER_VIEW_ALL") || user.HasClaim("Permission", "WORKORDER_VIEW"))
+        {
+            // Can see all
+            return await query.ToListAsync();
+        }
+        else if (user.HasClaim("Permission", "WORKORDER_VIEW_TEAM") || user.HasClaim("Permission", "WORKORDER_VIEW_OWN"))
+        {
+            // Can see own (Team behaves like own until teams are fully implemented)
+            query = query.Where(ot => ot.TechnicienId == userId || ot.ResponsableId == userId);
+            return await query.ToListAsync();
+        }
+
+        // No permissions
+        return new System.Collections.Generic.List<OrdresTravail>();
     }
 }
