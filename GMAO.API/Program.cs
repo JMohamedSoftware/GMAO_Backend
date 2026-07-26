@@ -56,7 +56,7 @@ builder.Services.AddAuthorization(options =>
         context.User.HasClaim("Permission", "WORKORDER_CREATE_TEAM") ||
         context.User.HasClaim("Permission", "WORKORDER_CREATE_OWN") ||
         context.User.IsInRole("SuperAdmin") ||
-        context.User.IsInRole("Admin")));
+        context.User.IsInRole("Administrateur")));
 
     options.AddPolicy("WorkOrderUpdate", policy => policy.RequireAssertion(context =>
         context.User.HasClaim("Permission", "WORKORDER_UPDATE") ||
@@ -64,7 +64,7 @@ builder.Services.AddAuthorization(options =>
         context.User.HasClaim("Permission", "WORKORDER_UPDATE_TEAM") ||
         context.User.HasClaim("Permission", "WORKORDER_UPDATE_OWN") ||
         context.User.IsInRole("SuperAdmin") ||
-        context.User.IsInRole("Admin")));
+        context.User.IsInRole("Administrateur")));
 });
 
 // ── Controllers & API ────────────────────────────────────────────────────────

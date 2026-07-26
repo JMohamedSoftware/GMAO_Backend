@@ -9,7 +9,7 @@ namespace GMAO.API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "SuperAdmin,Admin")]
+[Authorize(Roles = "SuperAdmin,Administrateur")]
 public class SettingsController : ControllerBase
 {
     private readonly GmaoDbContext _context;
