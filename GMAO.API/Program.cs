@@ -2,6 +2,7 @@ using System.Text;
 using GMAO.Application.Interfaces;
 using GMAO.Application.Services;
 using GMAO.Infrastructure.Data;
+using GMAO.Infrastructure.Services;
 using GMAO.Domain.Interfaces;
 using GMAO.Infrastructure.Repositories;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -46,7 +47,25 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    // Define policies for generic actions
+    options.AddPolicy("WorkOrderCreate", policy => policy.RequireAssertion(context =>
+        context.User.HasClaim("Permission", "WORKORDER_CREATE") ||
+        context.User.HasClaim("Permission", "WORKORDER_CREATE_ALL") ||
+        context.User.HasClaim("Permission", "WORKORDER_CREATE_TEAM") ||
+        context.User.HasClaim("Permission", "WORKORDER_CREATE_OWN") ||
+        context.User.IsInRole("SuperAdmin") ||
+        context.User.IsInRole("Admin")));
+
+    options.AddPolicy("WorkOrderUpdate", policy => policy.RequireAssertion(context =>
+        context.User.HasClaim("Permission", "WORKORDER_UPDATE") ||
+        context.User.HasClaim("Permission", "WORKORDER_UPDATE_ALL") ||
+        context.User.HasClaim("Permission", "WORKORDER_UPDATE_TEAM") ||
+        context.User.HasClaim("Permission", "WORKORDER_UPDATE_OWN") ||
+        context.User.IsInRole("SuperAdmin") ||
+        context.User.IsInRole("Admin")));
+});
 
 // ── Controllers & API ────────────────────────────────────────────────────────
 builder.Services.AddControllers(options =>
@@ -78,9 +97,12 @@ builder.Services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepositor
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IEquipementRepository, EquipementRepository>();
 builder.Services.AddScoped<IOrdreTravailRepository, OrdreTravailRepository>();
+builder.Services.AddScoped<IEquipeRepository, EquipeRepository>();
 
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IMaintenanceService, MaintenanceService>();
+builder.Services.AddScoped<IEquipeService, EquipeService>();
+builder.Services.AddScoped<ILocalisationService, LocalisationService>();
 
 builder.Services.AddSwaggerGen(c =>
 {

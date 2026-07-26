@@ -15,6 +15,10 @@ public class User
     // The company the user belongs to
     public int? SocieteId { get; set; }
     
+    // The team the user belongs to
+    public int? EquipeId { get; set; }
+    public Equipe? Equipe { get; set; }
+    
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

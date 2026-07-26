@@ -13,6 +13,7 @@ public class GmaoDbContext : DbContext
     public DbSet<RolePermission> RolePermissions { get; set; }
     public DbSet<Societe> Societes { get; set; }
     public DbSet<User> Users { get; set; }
+    public DbSet<Equipe> Equipes { get; set; }
     public DbSet<RefreshToken> RefreshTokens { get; set; }
     public DbSet<Competence> Competences { get; set; }
     public DbSet<TechnicienCompetence> TechnicienCompetences { get; set; }
@@ -55,24 +56,51 @@ public class GmaoDbContext : DbContext
 
         // Appliquer toutes les configurations depuis le dossier Configurations/
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(GmaoDbContext).Assembly);
+        
+        modelBuilder.Entity<Equipe>()
+            .HasOne(e => e.ChefEquipe)
+            .WithMany()
+            .HasForeignKey(e => e.ChefEquipeId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Equipe>()
+            .HasMany(e => e.Membres)
+            .WithOne(u => u.Equipe)
+            .HasForeignKey(u => u.EquipeId)
+            .OnDelete(DeleteBehavior.SetNull);
 
         // ── Seed Data ────────────────────────────────────────────────────────
         SeedRoles(modelBuilder);
         SeedFamilles(modelBuilder);
         SeedFamillesPieces(modelBuilder);
         SeedCompetences(modelBuilder);
+        SeedLocalisations(modelBuilder);
+    }
+
+    private static void SeedLocalisations(ModelBuilder modelBuilder)
+    {
+        // 1: Usine (Root)
+        modelBuilder.Entity<Localisation>().HasData(
+            new Localisation { Id = 1, Nom = "Usine", Description = "Site principal" },
+            new Localisation { Id = 2, Nom = "Réception", ParentId = 1 },
+            new Localisation { Id = 3, Nom = "Lavage", ParentId = 1 },
+            new Localisation { Id = 4, Nom = "Tri", ParentId = 1 },
+            new Localisation { Id = 5, Nom = "Concentration", ParentId = 1 },
+            new Localisation { Id = 6, Nom = "Conditionnement", ParentId = 1 },
+            new Localisation { Id = 7, Nom = "Stockage", ParentId = 1 },
+            new Localisation { Id = 8, Nom = "Utilités", ParentId = 1 }
+        );
     }
 
     private static void SeedRoles(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Role>().HasData(
-            new Role { Id = 1, Nom = "Admin",                Description = "Administrateur d'une société avec accès complet sur son périmètre" },
+            new Role { Id = 1, Nom = "Administrateur", Description = "Administrateur de la plateforme et de l'usine avec accès complet" },
             new Role { Id = 2, Nom = "Responsable Maintenance", Description = "Gestion des OT, validation des demandes et rapports" },
-            new Role { Id = 3, Nom = "Chef Equipe",          Description = "Supervision des techniciens et suivi des OT" },
-            new Role { Id = 4, Nom = "Technicien",           Description = "Exécution des interventions" },
-            new Role { Id = 5, Nom = "Production",           Description = "Déclaration des pannes" },
-            new Role { Id = 6, Nom = "Magasinier",           Description = "Gestion du stock de pièces de rechange" },
-            new Role { Id = 7, Nom = "SuperAdmin",           Description = "Administrateur plateforme - gère toutes les sociétés" }
+            new Role { Id = 3, Nom = "Chef d'équipe", Description = "Supervision des techniciens et suivi des OT" },
+            new Role { Id = 4, Nom = "Technicien", Description = "Exécution des interventions" },
+            new Role { Id = 5, Nom = "Responsable Production", Description = "Déclaration des pannes et validation" },
+            new Role { Id = 7, Nom = "SuperAdmin", Description = "Administrateur global de la plateforme" }
         );
     }
 

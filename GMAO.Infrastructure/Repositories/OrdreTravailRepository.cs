@@ -37,15 +37,37 @@ public class OrdreTravailRepository : GenericRepository<OrdresTravail>, IOrdreTr
             return new System.Collections.Generic.List<OrdresTravail>();
         }
 
+        // Get current user's team if any
+        int? userEquipeId = null;
+        var currentUserEntity = await _context.Set<User>().FindAsync(userId);
+        if (currentUserEntity != null) userEquipeId = currentUserEntity.EquipeId;
+
         // Check for specific scopes
         if (user.HasClaim("Permission", "WORKORDER_VIEW_ALL") || user.HasClaim("Permission", "WORKORDER_VIEW"))
         {
             // Can see all
             return await query.ToListAsync();
         }
-        else if (user.HasClaim("Permission", "WORKORDER_VIEW_TEAM") || user.HasClaim("Permission", "WORKORDER_VIEW_OWN"))
+        else if (user.HasClaim("Permission", "WORKORDER_VIEW_TEAM"))
         {
-            // Can see own (Team behaves like own until teams are fully implemented)
+            // Can see own + team
+            if (userEquipeId.HasValue)
+            {
+                query = query.Where(ot => 
+                    ot.TechnicienId == userId || 
+                    ot.ResponsableId == userId ||
+                    (ot.Technicien != null && ot.Technicien.EquipeId == userEquipeId) ||
+                    (ot.Responsable != null && ot.Responsable.EquipeId == userEquipeId));
+            }
+            else
+            {
+                query = query.Where(ot => ot.TechnicienId == userId || ot.ResponsableId == userId);
+            }
+            return await query.ToListAsync();
+        }
+        else if (user.HasClaim("Permission", "WORKORDER_VIEW_OWN"))
+        {
+            // Can see own
             query = query.Where(ot => ot.TechnicienId == userId || ot.ResponsableId == userId);
             return await query.ToListAsync();
         }

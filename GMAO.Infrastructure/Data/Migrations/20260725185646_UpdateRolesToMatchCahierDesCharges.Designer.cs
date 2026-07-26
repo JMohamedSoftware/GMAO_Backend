@@ -3,6 +3,7 @@ using System;
 using GMAO.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace GMAO.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(GmaoDbContext))]
-    partial class GmaoDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260725185646_UpdateRolesToMatchCahierDesCharges")]
+    partial class UpdateRolesToMatchCahierDesCharges
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -646,56 +649,6 @@ namespace GMAO.Infrastructure.Data.Migrations
                     b.HasIndex("ParentId");
 
                     b.ToTable("Localisations", (string)null);
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            Description = "Site principal",
-                            Nom = "Usine"
-                        },
-                        new
-                        {
-                            Id = 2,
-                            Nom = "Réception",
-                            ParentId = 1
-                        },
-                        new
-                        {
-                            Id = 3,
-                            Nom = "Lavage",
-                            ParentId = 1
-                        },
-                        new
-                        {
-                            Id = 4,
-                            Nom = "Tri",
-                            ParentId = 1
-                        },
-                        new
-                        {
-                            Id = 5,
-                            Nom = "Concentration",
-                            ParentId = 1
-                        },
-                        new
-                        {
-                            Id = 6,
-                            Nom = "Conditionnement",
-                            ParentId = 1
-                        },
-                        new
-                        {
-                            Id = 7,
-                            Nom = "Stockage",
-                            ParentId = 1
-                        },
-                        new
-                        {
-                            Id = 8,
-                            Nom = "Utilités",
-                            ParentId = 1
-                        });
                 });
 
             modelBuilder.Entity("GMAO.Domain.Entities.MouvementStock", b =>
@@ -1094,12 +1047,6 @@ namespace GMAO.Infrastructure.Data.Migrations
                             Id = 5,
                             Description = "Déclaration des pannes et validation",
                             Nom = "Responsable Production"
-                        },
-                        new
-                        {
-                            Id = 7,
-                            Description = "Administrateur global de la plateforme",
-                            Nom = "SuperAdmin"
                         });
                 });
 
