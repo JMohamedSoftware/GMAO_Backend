@@ -137,6 +137,33 @@ try
     var db = scope.ServiceProvider.GetRequiredService<GmaoDbContext>();
     db.Database.Migrate();
     Console.WriteLine("✅ Database migration completed successfully.");
+
+    // Seeding demo data
+    if (!db.Localisations.Any(l => l.Nom == "05 - Usine Tomates POMODORO"))
+    {
+        Console.WriteLine("🌱 Seeding Demo Data...");
+        var root = new GMAO.Domain.Entities.Localisation { Nom = "05 - Usine Tomates POMODORO" };
+        db.Localisations.Add(root);
+        db.SaveChanges();
+
+        var l1 = new GMAO.Domain.Entities.Localisation { Nom = "1 - Réception & Lavage", ParentId = root.Id };
+        var l2 = new GMAO.Domain.Entities.Localisation { Nom = "2 - Concentration", ParentId = root.Id };
+        var l3 = new GMAO.Domain.Entities.Localisation { Nom = "3 - Conditionnement & Stérilisation", ParentId = root.Id };
+        var l4 = new GMAO.Domain.Entities.Localisation { Nom = "4 - Énergie & Utilités", ParentId = root.Id };
+
+        db.Localisations.AddRange(l1, l2, l3, l4);
+        db.SaveChanges();
+
+        var e1 = new GMAO.Domain.Entities.Equipement { Id = "EQ-CONV-001", Name = "Convoyeur à bande Réception", Category = "Production", Criticality = "Haute", Status = "En service", HealthIndex = 85, LocalisationId = l1.Id, SerialNumber = "SN-001", Brand = "Buhler", CommissionDate = DateTime.UtcNow };
+        var e2 = new GMAO.Domain.Entities.Equipement { Id = "EQ-EVAP-001", Name = "Évaporateur Concentrateur N°1", Category = "Production", Criticality = "Critique", Status = "En service", HealthIndex = 70, LocalisationId = l2.Id, SerialNumber = "SN-002", Brand = "Alfa Laval", CommissionDate = DateTime.UtcNow };
+        var e3 = new GMAO.Domain.Entities.Equipement { Id = "EQ-PUMP-001", Name = "Pompe Centrifuge LKH-25", Category = "Production", Criticality = "Moyenne", Status = "En panne", HealthIndex = 30, LocalisationId = l2.Id, SerialNumber = "SN-003", Brand = "Alfa Laval", CommissionDate = DateTime.UtcNow };
+        var e4 = new GMAO.Domain.Entities.Equipement { Id = "EQ-AUTO-001", Name = "Autoclave FMC Steril-Host 4", Category = "Production", Criticality = "Critique", Status = "En maintenance", HealthIndex = 50, LocalisationId = l3.Id, SerialNumber = "SN-004", Brand = "FMC", CommissionDate = DateTime.UtcNow };
+        var e5 = new GMAO.Domain.Entities.Equipement { Id = "EQ-BOIL-001", Name = "Chaudière Thermique Babcock VAP 3000", Category = "Utilités", Criticality = "Critique", Status = "En service", HealthIndex = 95, LocalisationId = l4.Id, SerialNumber = "SN-005", Brand = "Babcock", CommissionDate = DateTime.UtcNow };
+
+        db.Equipements.AddRange(e1, e2, e3, e4, e5);
+        db.SaveChanges();
+        Console.WriteLine("✅ Seeding completed successfully.");
+    }
 }
 catch (Exception ex)
 {
