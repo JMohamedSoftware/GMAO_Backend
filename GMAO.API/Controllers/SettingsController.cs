@@ -62,4 +62,67 @@ public class SettingsController : ControllerBase
         await _context.SaveChangesAsync();
         return Ok(new { message = "Permissions updated successfully" });
     }
+
+    [HttpPost("Roles")]
+    public async Task<ActionResult<RoleDto>> CreateRole([FromBody] RoleCreateDto dto)
+    {
+        var role = new Role
+        {
+            Nom = dto.Nom,
+            Description = dto.Description
+        };
+
+        _context.Roles.Add(role);
+        await _context.SaveChangesAsync();
+
+        return Ok(new RoleDto
+        {
+            Id = role.Id,
+            Nom = role.Nom,
+            Description = role.Description,
+            Permissions = new List<string>()
+        });
+    }
+
+    [HttpPut("Roles/{id}")]
+    public async Task<ActionResult<RoleDto>> UpdateRole(int id, [FromBody] RoleCreateDto dto)
+    {
+        var role = await _context.Roles.FindAsync(id);
+        if (role == null) return NotFound("Role not found");
+
+        if (role.Nom == "SuperAdmin" || role.Nom == "Administrateur")
+            return BadRequest("Impossible de modifier les rôles système de base.");
+
+        role.Nom = dto.Nom;
+        role.Description = dto.Description;
+
+        await _context.SaveChangesAsync();
+
+        return Ok(new RoleDto
+        {
+            Id = role.Id,
+            Nom = role.Nom,
+            Description = role.Description,
+            Permissions = await _context.RolePermissions.Where(rp => rp.RoleId == id).Select(rp => rp.PermissionName).ToListAsync()
+        });
+    }
+
+    [HttpDelete("Roles/{id}")]
+    public async Task<ActionResult> DeleteRole(int id)
+    {
+        var role = await _context.Roles.FindAsync(id);
+        if (role == null) return NotFound("Role not found");
+
+        if (role.Nom == "SuperAdmin" || role.Nom == "Administrateur")
+            return BadRequest("Impossible de supprimer les rôles système de base.");
+
+        var usersInRole = await _context.Users.AnyAsync(u => u.RoleId == id);
+        if (usersInRole)
+            return BadRequest("Impossible de supprimer ce rôle car des utilisateurs y sont associés.");
+
+        _context.Roles.Remove(role);
+        await _context.SaveChangesAsync();
+
+        return Ok(new { message = "Role deleted successfully" });
+    }
 }
