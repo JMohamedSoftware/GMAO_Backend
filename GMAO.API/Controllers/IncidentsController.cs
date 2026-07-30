@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using GMAO.Domain.Entities;
 using GMAO.Domain.Interfaces;
+using GMAO.Domain.Enums;
 
 namespace GMAO.API.Controllers;
 
@@ -40,15 +41,31 @@ public class IncidentsController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = incident.Id }, incident);
     }
 
+    /// <summary>
+    /// Updates an incident. Copies scalar fields onto the tracked entity to avoid
+    /// EF Core "duplicate tracking" InvalidOperationException.
+    /// </summary>
     [HttpPut("{id}")]
     public async Task<IActionResult> Update(int id, [FromBody] DemandeIntervention incident)
     {
-        if (id != incident.Id) return BadRequest();
-        
+        if (id != incident.Id) return BadRequest("L'id dans l'URL ne correspond pas au corps.");
+
+        // Load the already-tracked entity from the DB
         var existing = await _repository.GetByIdAsync(id);
         if (existing == null) return NotFound();
 
-        await _repository.UpdateAsync(incident);
+        // Patch only the scalar/value properties — do NOT replace navigation objects
+        existing.EquipementId      = incident.EquipementId;
+        existing.DemandeurId       = incident.DemandeurId;
+        existing.DatePanne         = incident.DatePanne;
+        existing.Description       = incident.Description;
+        existing.Priorite          = incident.Priorite;
+        existing.Statut            = incident.Statut;
+        existing.PhotoUrl          = incident.PhotoUrl;
+        existing.CommentaireRejet  = incident.CommentaireRejet;
+
+        // existing is already tracked, so Update() will pick up changes
+        await _repository.UpdateAsync(existing);
         return NoContent();
     }
 
