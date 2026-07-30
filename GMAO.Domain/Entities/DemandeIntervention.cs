@@ -5,6 +5,7 @@ namespace GMAO.Domain.Entities;
 public class DemandeIntervention
 {
     public int Id { get; set; }
+    public int SocieteId { get; set; }    // Multi-tenant: incident appartient à une société
     public int EquipementId { get; set; }
     public int DemandeurId { get; set; }
     public DateTime DatePanne { get; set; }
@@ -16,6 +17,7 @@ public class DemandeIntervention
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     // Navigation
+    public Societe Societe { get; set; } = null!;
     public Equipement Equipement { get; set; } = null!;
     public User Demandeur { get; set; } = null!;
     public OrdresTravail? OrdreTravail { get; set; }

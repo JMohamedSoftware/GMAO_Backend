@@ -15,6 +15,9 @@ Environment.SetEnvironmentVariable("DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE", "
 
 var builder = WebApplication.CreateBuilder(args);
 
+// ── IHttpContextAccessor (requis pour le Multi-Tenant dans GmaoDbContext) ────
+builder.Services.AddHttpContextAccessor();
+
 // ── Base de données PostgreSQL ───────────────────────────────────────────────
 builder.Services.AddDbContext<GmaoDbContext>(options =>
     options.UseNpgsql(

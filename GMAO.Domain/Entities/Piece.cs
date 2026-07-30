@@ -3,6 +3,7 @@ namespace GMAO.Domain.Entities;
 public class Piece
 {
     public int Id { get; set; }
+    public int SocieteId { get; set; }    // Multi-tenant: pièce appartient à une société
     public string Reference { get; set; } = string.Empty;
     public string Designation { get; set; } = string.Empty;
     public int? FamillePieceId { get; set; }

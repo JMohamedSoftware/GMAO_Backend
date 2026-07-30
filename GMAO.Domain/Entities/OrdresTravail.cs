@@ -5,6 +5,7 @@ namespace GMAO.Domain.Entities;
 public class OrdresTravail
 {
     public int Id { get; set; }
+    public int SocieteId { get; set; }    // Multi-tenant: OT appartient à une société
     public string NumeroOT { get; set; } = string.Empty;  // Ex: OT-2026-001
     public int? DemandeId { get; set; }
     public int EquipementId { get; set; }

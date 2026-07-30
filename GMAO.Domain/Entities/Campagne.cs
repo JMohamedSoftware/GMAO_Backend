@@ -5,6 +5,7 @@ namespace GMAO.Domain.Entities;
 public class Campagne
 {
     public int Id { get; set; }
+    public int SocieteId { get; set; }    // Multi-tenant: campagne appartient à une société
     public string Nom { get; set; } = string.Empty;       // Ex: "Campagne Tomates 2026"
     public string? Description { get; set; }
     public DateOnly DateDebut { get; set; }

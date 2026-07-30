@@ -1,12 +1,30 @@
 using GMAO.Domain.Entities;
 using GMAO.Domain.Enums;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace GMAO.Infrastructure.Data;
 
 public class GmaoDbContext : DbContext
 {
-    public GmaoDbContext(DbContextOptions<GmaoDbContext> options) : base(options) { }
+    private readonly int? _currentSocieteId;
+    private readonly bool _isSuperAdmin;
+
+    public GmaoDbContext(
+        DbContextOptions<GmaoDbContext> options,
+        IHttpContextAccessor? httpContextAccessor = null) : base(options)
+    {
+        var user = httpContextAccessor?.HttpContext?.User;
+        if (user?.Identity?.IsAuthenticated == true)
+        {
+            var roleClaim = user.FindFirst(ClaimTypes.Role)?.Value;
+            _isSuperAdmin = roleClaim == "SuperAdmin";
+
+            var societeIdClaim = user.FindFirst("SocieteId")?.Value;
+            _currentSocieteId = int.TryParse(societeIdClaim, out var sid) && sid > 0 ? sid : null;
+        }
+    }
 
     // ── Auth & Utilisateurs ─────────────────────────────────────────────────
     public DbSet<Role> Roles { get; set; }
@@ -56,7 +74,28 @@ public class GmaoDbContext : DbContext
 
         // Appliquer toutes les configurations depuis le dossier Configurations/
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(GmaoDbContext).Assembly);
-        
+
+        // ── Global Query Filters (Multi-Tenant) ──────────────────────────────
+        // SuperAdmin voit tout. Les autres voient uniquement leur société.
+        modelBuilder.Entity<Equipement>()
+            .HasQueryFilter(e => _isSuperAdmin || _currentSocieteId == null || e.SocieteId == _currentSocieteId);
+
+        modelBuilder.Entity<DemandeIntervention>()
+            .HasQueryFilter(d => _isSuperAdmin || _currentSocieteId == null || d.SocieteId == _currentSocieteId);
+
+        modelBuilder.Entity<OrdresTravail>()
+            .HasQueryFilter(ot => _isSuperAdmin || _currentSocieteId == null || ot.SocieteId == _currentSocieteId);
+
+        modelBuilder.Entity<Piece>()
+            .HasQueryFilter(p => _isSuperAdmin || _currentSocieteId == null || p.SocieteId == _currentSocieteId);
+
+        modelBuilder.Entity<Fournisseur>()
+            .HasQueryFilter(f => _isSuperAdmin || _currentSocieteId == null || f.SocieteId == _currentSocieteId);
+
+        modelBuilder.Entity<Campagne>()
+            .HasQueryFilter(c => _isSuperAdmin || _currentSocieteId == null || c.SocieteId == _currentSocieteId);
+
+        // ── Relations Equipe ─────────────────────────────────────────────────
         modelBuilder.Entity<Equipe>()
             .HasOne(e => e.ChefEquipe)
             .WithMany()
@@ -75,6 +114,26 @@ public class GmaoDbContext : DbContext
         SeedFamillesPieces(modelBuilder);
         SeedCompetences(modelBuilder);
         SeedLocalisations(modelBuilder);
+    }
+
+    // ── Auto-inject SocieteId on INSERT ─────────────────────────────────────
+    // When any new entity is saved, if it has a SocieteId property and it's
+    // not set yet (= 0), automatically fill it from the current JWT token.
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        if (_currentSocieteId.HasValue)
+        {
+            foreach (var entry in ChangeTracker.Entries()
+                .Where(e => e.State == EntityState.Added))
+            {
+                var prop = entry.Properties.FirstOrDefault(p => p.Metadata.Name == "SocieteId");
+                if (prop != null && (prop.CurrentValue == null || (int)prop.CurrentValue == 0))
+                {
+                    prop.CurrentValue = _currentSocieteId.Value;
+                }
+            }
+        }
+        return base.SaveChangesAsync(cancellationToken);
     }
 
     private static void SeedLocalisations(ModelBuilder modelBuilder)

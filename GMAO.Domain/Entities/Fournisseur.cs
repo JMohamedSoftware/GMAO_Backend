@@ -3,6 +3,7 @@ namespace GMAO.Domain.Entities;
 public class Fournisseur
 {
     public int Id { get; set; }
+    public int SocieteId { get; set; }    // Multi-tenant: fournisseur appartient à une société
     public string Code { get; set; } = string.Empty;
     public string Nom { get; set; } = string.Empty;
     public string? Adresse { get; set; }
