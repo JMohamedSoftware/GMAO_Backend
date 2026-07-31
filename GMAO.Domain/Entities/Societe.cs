@@ -13,6 +13,9 @@ public class Societe
     
     public string? EmailContact { get; set; }
     
+    public string SubscriptionPlan { get; set; } = "Basic"; // "Basic", "Premium", "Enterprise"
+    public int CapacityTonsPerDay { get; set; } = 450;
+    
     public bool IsActive { get; set; } = true;
     
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
