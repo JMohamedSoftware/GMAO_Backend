@@ -12,6 +12,16 @@ public class UserRepository : GenericRepository<User>, IUserRepository
     {
     }
 
+    // Override to include Role so the frontend can display the correct role name
+    public override async Task<IEnumerable<User>> GetAllAsync()
+    {
+        return await _context.Users
+            .Include(u => u.Role)
+                .ThenInclude(r => r.RolePermissions)
+            .Include(u => u.Societe)
+            .ToListAsync();
+    }
+
     public async Task<User?> GetByEmailAsync(string email)
     {
         return await _context.Users
