@@ -199,6 +199,11 @@ public class PlansPreventifController : ControllerBase
         var responsableIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         int responsableId = int.TryParse(responsableIdStr, out var rid) ? rid : 1;
 
+        // Gérer la description selon le type
+        string descType = plan.TypeDeclenchement == TypeDeclenchement.Saisonnier || plan.UniteMesure?.ToLower() == "saisonnier"
+            ? "Intervention saisonnière"
+            : $"Fréquence: tous les {plan.Frequence} {plan.UniteMesure}";
+
         var ot = new OrdresTravail
         {
             NumeroOT        = $"OT-PRV-{now.Year}-{plan.Id}-{now.Ticks % 10000}",
@@ -208,9 +213,9 @@ public class PlansPreventifController : ControllerBase
             Priorite        = PrioriteIntervention.Normale,
             Statut          = StatutOT.Planifie,
             DateCreation    = now,
-            DateDebutPrevue = plan.ProchaineDate ?? now,
-            Description     = $"OT Préventif généré depuis le plan: {plan.Titre}. " +
-                              $"Fréquence: tous les {plan.Frequence} {plan.UniteMesure}.",
+            DateDebutPrevue = now, // Demandé par le user : activé le jour même de la génération manuelle
+            DateFinPrevue   = now.AddDays(7), // Donner un délai logique par défaut (7 jours)
+            Description     = $"OT Préventif généré depuis le plan: {plan.Titre}. {descType}.",
             Instructions    = $"Plan préventif {plan.Id} — Équipement: {plan.Equipement?.Designation}"
         };
 
