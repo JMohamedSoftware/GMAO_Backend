@@ -21,4 +21,5 @@ public class Piece
     public FamillePiece? FamillePiece { get; set; }
     public Fournisseur? Fournisseur { get; set; }
     public ICollection<MouvementStock> MouvementsStock { get; set; } = new List<MouvementStock>();
+    public ICollection<Equipement> Equipements { get; set; } = new List<Equipement>();
 }

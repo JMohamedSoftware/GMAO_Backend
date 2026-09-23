@@ -26,4 +26,5 @@ public class EquipementDto
     public string? Notes { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+    public List<int> PiecesIds { get; set; } = new List<int>();
 }

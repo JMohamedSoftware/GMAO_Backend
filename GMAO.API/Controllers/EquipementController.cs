@@ -15,10 +15,12 @@ namespace GMAO.API.Controllers;
 public class EquipementController : ControllerBase
 {
     private readonly IEquipementRepository _equipementRepository;
+    private readonly IGenericRepository<Piece> _pieceRepository;
 
-    public EquipementController(IEquipementRepository equipementRepository)
+    public EquipementController(IEquipementRepository equipementRepository, IGenericRepository<Piece> pieceRepository)
     {
         _equipementRepository = equipementRepository;
+        _pieceRepository = pieceRepository;
     }
 
     private int GetSocieteId()
@@ -58,7 +60,8 @@ public class EquipementController : ControllerBase
             PhotoUrl = e.PhotoUrl,
             Notes = e.Notes,
             CreatedAt = e.CreatedAt,
-            UpdatedAt = e.UpdatedAt
+            UpdatedAt = e.UpdatedAt,
+            PiecesIds = e.Pieces != null ? e.Pieces.Select(p => p.Id).ToList() : new List<int>()
         });
 
         return Ok(dtos);
@@ -94,7 +97,8 @@ public class EquipementController : ControllerBase
             PhotoUrl = e.PhotoUrl,
             Notes = e.Notes,
             CreatedAt = e.CreatedAt,
-            UpdatedAt = e.UpdatedAt
+            UpdatedAt = e.UpdatedAt,
+            PiecesIds = e.Pieces != null ? e.Pieces.Select(p => p.Id).ToList() : new List<int>()
         };
 
         return Ok(dto);
@@ -133,5 +137,41 @@ public class EquipementController : ControllerBase
         
         await _equipementRepository.DeleteAsync(equipement);
         return NoContent();
+    }
+
+    [HttpPost("{id}/pieces/{pieceId}")]
+    public async Task<IActionResult> LinkPiece(int id, int pieceId)
+    {
+        var societeId = GetSocieteId();
+        var equipement = await _equipementRepository.GetByIdWithDetailsAsync(id, societeId);
+        if (equipement == null) return NotFound("Equipement not found");
+
+        var piece = await _pieceRepository.GetByIdAsync(pieceId);
+        if (piece == null || piece.SocieteId != societeId) return NotFound("Piece not found");
+
+        if (!equipement.Pieces.Any(p => p.Id == pieceId))
+        {
+            equipement.Pieces.Add(piece);
+            await _equipementRepository.UpdateAsync(equipement);
+        }
+
+        return Ok();
+    }
+
+    [HttpDelete("{id}/pieces/{pieceId}")]
+    public async Task<IActionResult> UnlinkPiece(int id, int pieceId)
+    {
+        var societeId = GetSocieteId();
+        var equipement = await _equipementRepository.GetByIdWithDetailsAsync(id, societeId);
+        if (equipement == null) return NotFound("Equipement not found");
+
+        var piece = equipement.Pieces.FirstOrDefault(p => p.Id == pieceId);
+        if (piece != null)
+        {
+            equipement.Pieces.Remove(piece);
+            await _equipementRepository.UpdateAsync(equipement);
+        }
+
+        return Ok();
     }
 }

@@ -33,4 +33,5 @@ public class Equipement
     public ICollection<OrdresTravail> OrdresTravail { get; set; } = new List<OrdresTravail>();
     public ICollection<PlanPreventif> PlansPreventifs { get; set; } = new List<PlanPreventif>();
     public ICollection<Document> Documents { get; set; } = new List<Document>();
+    public ICollection<Piece> Pieces { get; set; } = new List<Piece>();
 }
