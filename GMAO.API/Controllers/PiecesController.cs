@@ -48,7 +48,19 @@ public class PiecesController : ControllerBase
         var existing = await _repository.GetByIdAsync(id);
         if (existing == null) return NotFound();
 
-        await _repository.UpdateAsync(piece);
+        existing.Reference = piece.Reference;
+        existing.Designation = piece.Designation;
+        existing.FamillePieceId = piece.FamillePieceId;
+        existing.FournisseurId = piece.FournisseurId;
+        existing.StockActuel = piece.StockActuel;
+        existing.StockMinimum = piece.StockMinimum;
+        existing.StockMaximum = piece.StockMaximum;
+        existing.PrixUnitaire = piece.PrixUnitaire;
+        existing.Emplacement = piece.Emplacement;
+        existing.PhotoUrl = piece.PhotoUrl;
+        existing.SocieteId = piece.SocieteId;
+
+        await _repository.UpdateAsync(existing);
         return NoContent();
     }
 
