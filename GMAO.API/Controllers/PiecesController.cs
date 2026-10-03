@@ -57,7 +57,6 @@ public class PiecesController : ControllerBase
         existing.StockMaximum = piece.StockMaximum;
         existing.PrixUnitaire = piece.PrixUnitaire;
         existing.Emplacement = piece.Emplacement;
-        existing.PhotoUrl = piece.PhotoUrl;
         existing.SocieteId = piece.SocieteId;
 
         await _repository.UpdateAsync(existing);
