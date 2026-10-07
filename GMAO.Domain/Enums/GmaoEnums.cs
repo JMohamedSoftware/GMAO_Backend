@@ -59,7 +59,8 @@ public enum StatutOT
     EnCours = 3,
     Suspendu = 4,
     Termine = 5,
-    Annule = 6
+    Annule = 6,
+    AffecteChef = 7
 }
 
 public enum StatutIntervention
