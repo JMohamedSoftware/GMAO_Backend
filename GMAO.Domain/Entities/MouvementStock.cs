@@ -17,7 +17,7 @@ public class MouvementStock
     public DateTime Date { get; set; } = DateTime.UtcNow;
 
     // Navigation
-    public Piece Piece { get; set; } = null!;
+    public Piece? Piece { get; set; }
     public OrdresTravail? OT { get; set; }
-    public User User { get; set; } = null!;
+    public User? User { get; set; }
 }
