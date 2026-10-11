@@ -27,4 +27,5 @@ public class EquipementDto
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public List<int> PiecesIds { get; set; } = new List<int>();
+    public List<GMAO.Application.DTOs.Documents.DocumentDto> Documents { get; set; } = new();
 }

@@ -7,6 +7,9 @@ using GMAO.Application.DTOs.Equipements;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 
+using GMAO.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
+
 namespace GMAO.API.Controllers;
 
 [ApiController]
@@ -16,11 +19,16 @@ public class EquipementController : ControllerBase
 {
     private readonly IEquipementRepository _equipementRepository;
     private readonly IGenericRepository<Piece> _pieceRepository;
+    private readonly GmaoDbContext _context;
 
-    public EquipementController(IEquipementRepository equipementRepository, IGenericRepository<Piece> pieceRepository)
+    public EquipementController(
+        IEquipementRepository equipementRepository, 
+        IGenericRepository<Piece> pieceRepository,
+        GmaoDbContext context)
     {
         _equipementRepository = equipementRepository;
         _pieceRepository = pieceRepository;
+        _context = context;
     }
 
     private int GetSocieteId()
@@ -29,6 +37,15 @@ public class EquipementController : ControllerBase
         if (int.TryParse(societeIdClaim, out int societeId))
             return societeId;
         return 0; // Or throw exception
+    }
+
+    private static string FormatFileSize(long bytes)
+    {
+        if (bytes >= 1024 * 1024)
+            return $"{bytes / (1024.0 * 1024.0):0.#} MB";
+        if (bytes >= 1024)
+            return $"{bytes / 1024.0:0.#} KB";
+        return $"{bytes} B";
     }
 
     [HttpGet]
@@ -61,7 +78,18 @@ public class EquipementController : ControllerBase
             Notes = e.Notes,
             CreatedAt = e.CreatedAt,
             UpdatedAt = e.UpdatedAt,
-            PiecesIds = e.Pieces != null ? e.Pieces.Select(p => p.Id).ToList() : new List<int>()
+            PiecesIds = e.Pieces != null ? e.Pieces.Select(p => p.Id).ToList() : new List<int>(),
+            Documents = e.Documents != null ? e.Documents.Select(d => new GMAO.Application.DTOs.Documents.DocumentDto
+            {
+                Id = d.Id,
+                Name = d.Nom,
+                Type = d.Type.ToString().ToLower(),
+                Size = FormatFileSize(d.TailleFichierOctets),
+                Url = $"/api/Document/{d.Id}/file",
+                MimeType = d.MimeType,
+                EquipementId = d.EquipementId,
+                CreatedAt = d.CreatedAt
+            }).ToList() : new List<GMAO.Application.DTOs.Documents.DocumentDto>()
         });
 
         return Ok(dtos);
@@ -98,7 +126,18 @@ public class EquipementController : ControllerBase
             Notes = e.Notes,
             CreatedAt = e.CreatedAt,
             UpdatedAt = e.UpdatedAt,
-            PiecesIds = e.Pieces != null ? e.Pieces.Select(p => p.Id).ToList() : new List<int>()
+            PiecesIds = e.Pieces != null ? e.Pieces.Select(p => p.Id).ToList() : new List<int>(),
+            Documents = e.Documents != null ? e.Documents.Select(d => new GMAO.Application.DTOs.Documents.DocumentDto
+            {
+                Id = d.Id,
+                Name = d.Nom,
+                Type = d.Type.ToString().ToLower(),
+                Size = FormatFileSize(d.TailleFichierOctets),
+                Url = $"/api/Document/{d.Id}/file",
+                MimeType = d.MimeType,
+                EquipementId = d.EquipementId,
+                CreatedAt = d.CreatedAt
+            }).ToList() : new List<GMAO.Application.DTOs.Documents.DocumentDto>()
         };
 
         return Ok(dto);
@@ -139,37 +178,73 @@ public class EquipementController : ControllerBase
         return NoContent();
     }
 
-    [HttpPost("{id}/pieces/{pieceId}")]
-    public async Task<IActionResult> LinkPiece(int id, int pieceId)
+    [HttpPost("{id}/pieces/{pieceIdentifier}")]
+    public async Task<IActionResult> LinkPiece(string id, string pieceIdentifier)
     {
         var societeId = GetSocieteId();
-        var equipement = await _equipementRepository.GetByIdWithDetailsAsync(id, societeId);
+        
+        Equipement? equipement = null;
+        if (int.TryParse(id, out int eqId))
+        {
+            equipement = await _equipementRepository.GetByIdWithDetailsAsync(eqId, societeId);
+        }
+        if (equipement == null)
+        {
+            equipement = await _context.Equipements
+                .Include(e => e.Pieces)
+                .FirstOrDefaultAsync(e => e.Code == id && e.SocieteId == societeId);
+        }
+
         if (equipement == null) return NotFound("Equipement not found");
 
-        var piece = await _pieceRepository.GetByIdAsync(pieceId);
+        Piece? piece = null;
+        if (int.TryParse(pieceIdentifier, out int pId))
+        {
+            piece = await _pieceRepository.GetByIdAsync(pId);
+        }
+        if (piece == null)
+        {
+            piece = await _context.Pieces.FirstOrDefaultAsync(p => p.Reference == pieceIdentifier && p.SocieteId == societeId);
+        }
+
         if (piece == null || piece.SocieteId != societeId) return NotFound("Piece not found");
 
-        if (!equipement.Pieces.Any(p => p.Id == pieceId))
+        if (!equipement.Pieces.Any(p => p.Id == piece.Id))
         {
             equipement.Pieces.Add(piece);
-            await _equipementRepository.UpdateAsync(equipement);
+            await _context.SaveChangesAsync();
         }
 
         return Ok();
     }
 
-    [HttpDelete("{id}/pieces/{pieceId}")]
-    public async Task<IActionResult> UnlinkPiece(int id, int pieceId)
+    [HttpDelete("{id}/pieces/{pieceIdentifier}")]
+    public async Task<IActionResult> UnlinkPiece(string id, string pieceIdentifier)
     {
         var societeId = GetSocieteId();
-        var equipement = await _equipementRepository.GetByIdWithDetailsAsync(id, societeId);
+        
+        Equipement? equipement = null;
+        if (int.TryParse(id, out int eqId))
+        {
+            equipement = await _equipementRepository.GetByIdWithDetailsAsync(eqId, societeId);
+        }
+        if (equipement == null)
+        {
+            equipement = await _context.Equipements
+                .Include(e => e.Pieces)
+                .FirstOrDefaultAsync(e => e.Code == id && e.SocieteId == societeId);
+        }
+
         if (equipement == null) return NotFound("Equipement not found");
 
-        var piece = equipement.Pieces.FirstOrDefault(p => p.Id == pieceId);
+        var piece = equipement.Pieces.FirstOrDefault(p => 
+            p.Id.ToString() == pieceIdentifier || 
+            p.Reference.Equals(pieceIdentifier, StringComparison.OrdinalIgnoreCase));
+
         if (piece != null)
         {
             equipement.Pieces.Remove(piece);
-            await _equipementRepository.UpdateAsync(equipement);
+            await _context.SaveChangesAsync();
         }
 
         return Ok();

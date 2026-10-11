@@ -20,5 +20,5 @@ public class Document
     public Equipement? Equipement { get; set; }
     public OrdresTravail? OT { get; set; }
     public PlanPreventif? PlanPreventif { get; set; }
-    public User UploadedBy { get; set; } = null!;
+    public User? UploadedBy { get; set; }
 }

@@ -127,6 +127,15 @@ app.UseSwaggerUI(c =>
 
 app.UseCors("GmaoPolicy");
 
+var webRootPath = app.Environment.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+var uploadsPath = Path.Combine(webRootPath, "uploads", "documents");
+if (!Directory.Exists(uploadsPath))
+{
+    Directory.CreateDirectory(uploadsPath);
+}
+
+app.UseStaticFiles();
+
 app.UseAuthentication();
 app.UseAuthorization();
 

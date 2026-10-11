@@ -24,6 +24,7 @@ public class EquipementRepository : GenericRepository<Equipement>, IEquipementRe
             .Include(e => e.Localisation)
             .Include(e => e.Fournisseur)
             .Include(e => e.Pieces)
+            .Include(e => e.Documents)
             .Where(e => e.SocieteId == societeId)
             .ToListAsync();
     }
@@ -35,6 +36,7 @@ public class EquipementRepository : GenericRepository<Equipement>, IEquipementRe
             .Include(e => e.Localisation)
             .Include(e => e.Fournisseur)
             .Include(e => e.Pieces)
+            .Include(e => e.Documents)
             .FirstOrDefaultAsync(e => e.Id == id && e.SocieteId == societeId);
     }
 }
