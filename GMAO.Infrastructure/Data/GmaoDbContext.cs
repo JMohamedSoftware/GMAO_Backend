@@ -68,6 +68,13 @@ public class GmaoDbContext : DbContext
     public DbSet<Notification> Notifications { get; set; }
     public DbSet<Historique> Historiques { get; set; }
 
+    // ── SuperAdmin SaaS ───────────────────────────────────────────────────────
+    public DbSet<SiteUsine> SitesUsines { get; set; }
+    public DbSet<PlanOffre> PlansOffres { get; set; }
+    public DbSet<Facture> Factures { get; set; }
+    public DbSet<JournalSuperAdmin> JournauxSuperAdmin { get; set; }
+    public DbSet<PlatformSettings> PlatformSettings { get; set; }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -94,6 +101,12 @@ public class GmaoDbContext : DbContext
 
         modelBuilder.Entity<Campagne>()
             .HasQueryFilter(c => _isSuperAdmin || _currentSocieteId == null || c.SocieteId == _currentSocieteId);
+
+        modelBuilder.Entity<SiteUsine>()
+            .HasQueryFilter(s => _isSuperAdmin || _currentSocieteId == null || s.SocieteId == _currentSocieteId);
+
+        modelBuilder.Entity<Facture>()
+            .HasQueryFilter(f => _isSuperAdmin || _currentSocieteId == null || f.SocieteId == _currentSocieteId);
 
         // ── Relations Equipe ─────────────────────────────────────────────────
         modelBuilder.Entity<Equipe>()
