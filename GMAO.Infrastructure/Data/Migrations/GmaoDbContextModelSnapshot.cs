@@ -360,6 +360,69 @@ namespace GMAO.Infrastructure.Data.Migrations
                     b.ToTable("Equipements", (string)null);
                 });
 
+            modelBuilder.Entity("GMAO.Domain.Entities.Facture", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("DateEcheance")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("DateEmission")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DatePaiement")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("MethodePaiement")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("MontantHT")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("MontantTTC")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("text");
+
+                    b.Property<string>("NumeroFacture")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Periode")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Plan")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("SocieteId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SocieteNom")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Statut")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("TauxTVA")
+                        .HasColumnType("numeric");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SocieteId");
+
+                    b.ToTable("Factures");
+                });
+
             modelBuilder.Entity("GMAO.Domain.Entities.Famille", b =>
                 {
                     b.Property<int>("Id")
@@ -645,6 +708,63 @@ namespace GMAO.Infrastructure.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("Interventions", (string)null);
+                });
+
+            modelBuilder.Entity("GMAO.Domain.Entities.JournalSuperAdmin", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("AdresseIp")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Categorie")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("DateHeure")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Details")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Navigateur")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Niveau")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("SocieteNom")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Statut")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UserNom")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("UserRole")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("JournauxSuperAdmin");
                 });
 
             modelBuilder.Entity("GMAO.Domain.Entities.Localisation", b =>
@@ -985,6 +1105,66 @@ namespace GMAO.Infrastructure.Data.Migrations
                     b.ToTable("Pieces", (string)null);
                 });
 
+            modelBuilder.Entity("GMAO.Domain.Entities.PlanOffre", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("FonctionnalitesJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsPopular")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("MaxEquipements")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MaxSites")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MaxStorageGb")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MaxUsers")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Nom")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("PrixAnnuel")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("PrixMensuel")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("SupportLevel")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("PlansOffres");
+                });
+
             modelBuilder.Entity("GMAO.Domain.Entities.PlanPreventif", b =>
                 {
                     b.Property<int>("Id")
@@ -1032,6 +1212,86 @@ namespace GMAO.Infrastructure.Data.Migrations
                     b.HasIndex("EquipementId");
 
                     b.ToTable("PlansPreventifs", (string)null);
+                });
+
+            modelBuilder.Entity("GMAO.Domain.Entities.PlatformSettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("AllowNewRegistrations")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("BackupAuto")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("BackupFrequence")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("DefaultTrialDays")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Devise")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("MaintenanceMode")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("NomPlateforme")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("RetentionJours")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SmtpHost")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("SmtpPort")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("SmtpSsl")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("SmtpUser")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("StorageProvider")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("SupportEmail")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("SupportTelephone")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("TauxTvaParDefaut")
+                        .HasColumnType("numeric");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UrlPlateforme")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("VersionPlateforme")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("PlatformSettings");
                 });
 
             modelBuilder.Entity("GMAO.Domain.Entities.RefreshToken", b =>
@@ -1157,6 +1417,76 @@ namespace GMAO.Infrastructure.Data.Migrations
                     b.ToTable("RolePermissions");
                 });
 
+            modelBuilder.Entity("GMAO.Domain.Entities.SiteUsine", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Adresse")
+                        .HasColumnType("text");
+
+                    b.Property<string>("CapaciteProduction")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("CodeSite")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Email")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Gouvernorat")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Nom")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("NombreEquipements")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("NombreUtilisateurs")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PhotoUrl")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Responsable")
+                        .HasColumnType("text");
+
+                    b.Property<int>("SocieteId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Statut")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Telephone")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Ville")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SocieteId");
+
+                    b.ToTable("SitesUsines");
+                });
+
             modelBuilder.Entity("GMAO.Domain.Entities.Societe", b =>
                 {
                     b.Property<int>("Id")
@@ -1172,6 +1502,9 @@ namespace GMAO.Infrastructure.Data.Migrations
                     b.Property<int>("CapacityTonsPerDay")
                         .HasColumnType("integer");
 
+                    b.Property<string>("Category")
+                        .HasColumnType("text");
+
                     b.Property<string>("CodeTenant")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -1184,16 +1517,59 @@ namespace GMAO.Infrastructure.Data.Migrations
                         .HasMaxLength(150)
                         .HasColumnType("character varying(150)");
 
+                    b.Property<string>("Gouvernorat")
+                        .HasColumnType("text");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("LogoUrl")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ManagerNom")
+                        .HasColumnType("text");
+
+                    b.Property<int>("MaxEquipements")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MaxSites")
+                        .HasColumnType("integer");
+
+                    b.Property<double>("MaxStorageGb")
+                        .HasColumnType("double precision");
+
+                    b.Property<int>("MaxUsers")
+                        .HasColumnType("integer");
 
                     b.Property<string>("Nom")
                         .IsRequired()
                         .HasMaxLength(150)
                         .HasColumnType("character varying(150)");
 
+                    b.Property<double>("StorageUsedGb")
+                        .HasColumnType("double precision");
+
+                    b.Property<decimal>("SubscriptionAmount")
+                        .HasColumnType("numeric");
+
+                    b.Property<DateTime?>("SubscriptionEndDate")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("SubscriptionPlan")
                         .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("SubscriptionStartDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SubscriptionStatus")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Telephone")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Ville")
                         .HasColumnType("text");
 
                     b.HasKey("Id");
@@ -1440,6 +1816,17 @@ namespace GMAO.Infrastructure.Data.Migrations
                     b.Navigation("Societe");
                 });
 
+            modelBuilder.Entity("GMAO.Domain.Entities.Facture", b =>
+                {
+                    b.HasOne("GMAO.Domain.Entities.Societe", "Societe")
+                        .WithMany("Factures")
+                        .HasForeignKey("SocieteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Societe");
+                });
+
             modelBuilder.Entity("GMAO.Domain.Entities.Historique", b =>
                 {
                     b.HasOne("GMAO.Domain.Entities.User", "User")
@@ -1599,6 +1986,17 @@ namespace GMAO.Infrastructure.Data.Migrations
                     b.Navigation("Role");
                 });
 
+            modelBuilder.Entity("GMAO.Domain.Entities.SiteUsine", b =>
+                {
+                    b.HasOne("GMAO.Domain.Entities.Societe", "Societe")
+                        .WithMany("Sites")
+                        .HasForeignKey("SocieteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Societe");
+                });
+
             modelBuilder.Entity("GMAO.Domain.Entities.TachePreventive", b =>
                 {
                     b.HasOne("GMAO.Domain.Entities.PlanPreventif", "Plan")
@@ -1739,6 +2137,10 @@ namespace GMAO.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("GMAO.Domain.Entities.Societe", b =>
                 {
+                    b.Navigation("Factures");
+
+                    b.Navigation("Sites");
+
                     b.Navigation("Users");
                 });
 
