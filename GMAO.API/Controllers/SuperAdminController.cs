@@ -49,6 +49,30 @@ public class SuperAdminController : ControllerBase
         var pendingInvoicesCount = await _db.Factures.IgnoreQueryFilters()
             .CountAsync(f => f.Statut == "En attente" || f.Statut == "En retard");
 
+        var trialTenantsCount = await _db.Societes.IgnoreQueryFilters()
+            .CountAsync(s => s.SubscriptionStatus == "Essai" || s.SubscriptionPlan == "Essai gratuit");
+
+        var now = DateTime.UtcNow;
+        var in30Days = now.AddDays(30);
+
+        var renewingTenants = await _db.Societes.IgnoreQueryFilters()
+            .Where(s => s.IsActive && s.SubscriptionEndDate != null
+                && s.SubscriptionEndDate >= now
+                && s.SubscriptionEndDate <= in30Days)
+            .OrderBy(s => s.SubscriptionEndDate)
+            .Take(10)
+            .Select(s => new
+            {
+                s.Id,
+                s.Nom,
+                s.SubscriptionPlan,
+                s.SubscriptionEndDate,
+                DaysLeft = (int)(s.SubscriptionEndDate!.Value - now).TotalDays
+            })
+            .ToListAsync();
+
+        var renewalCount = renewingTenants.Count;
+
         var recentLogs = await _db.JournauxSuperAdmin.IgnoreQueryFilters()
             .OrderByDescending(j => j.DateHeure)
             .Take(5)
@@ -63,6 +87,7 @@ public class SuperAdminController : ControllerBase
                 s.Nom,
                 s.CodeTenant,
                 s.Category,
+                s.ManagerNom,
                 s.SubscriptionPlan,
                 s.SubscriptionStatus,
                 s.SubscriptionAmount,
@@ -91,11 +116,14 @@ public class SuperAdminController : ControllerBase
                 arr,
                 totalRevenue = totalInvoicesPaid,
                 pendingInvoicesCount,
+                trialTenantsCount,
+                renewalCount,
                 systemHealth = 99.98,
                 avgResponseTimeMs = 42
             },
             recentLogs,
             recentTenants,
+            renewingTenants,
             planDistribution
         });
     }
