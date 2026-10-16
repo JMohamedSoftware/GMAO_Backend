@@ -87,14 +87,22 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("GmaoPolicy", policy =>
     {
-        policy.WithOrigins(
-            "http://localhost:5173", 
-            "https://gmao-frontend.vercel.app", 
-            "https://g-m-a-o.vercel.app",
-            "https://gmao-saas.com" // future domain
-        )
+        policy.SetIsOriginAllowed(origin =>
+        {
+            if (string.IsNullOrEmpty(origin)) return false;
+            try
+            {
+                var host = new Uri(origin).Host;
+                return host == "localhost" || host == "127.0.0.1" || origin.Contains("vercel.app") || origin.Contains("gmao-saas.com");
+            }
+            catch
+            {
+                return false;
+            }
+        })
         .AllowAnyHeader()
-        .AllowAnyMethod();
+        .AllowAnyMethod()
+        .AllowCredentials();
     });
 });
 

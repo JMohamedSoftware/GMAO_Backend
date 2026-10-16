@@ -849,7 +849,8 @@ public class SuperAdminController : ControllerBase
     private async Task EnsureSeedDataAsync()
     {
         var count = await _db.Societes.IgnoreQueryFilters().CountAsync();
-        if (count < 3)
+        var userWithSocieteCount = await _db.Users.IgnoreQueryFilters().CountAsync(u => u.SocieteId != null);
+        if (count < 3 || userWithSocieteCount < 3)
         {
             await SeedDataInternalAsync(false);
         }
@@ -1432,6 +1433,189 @@ public class SuperAdminController : ControllerBase
             _db.PlatformSettings.Add(defaultSettings);
             await _db.SaveChangesAsync();
         }
+
+        // 7. Seed & Associate Users for Tenants
+        var pomodoro = await _db.Societes.IgnoreQueryFilters().FirstOrDefaultAsync(s => s.Id == 1 || s.CodeTenant == "tenant-midi");
+        if (pomodoro != null)
+        {
+            var pAdmin = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Email == "admin@pomodoro.com");
+            if (pAdmin != null && pAdmin.SocieteId == null)
+            {
+                pAdmin.SocieteId = pomodoro.Id;
+            }
+            var pAli = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Email == "ali@tomate.com");
+            if (pAli != null && pAli.SocieteId == null)
+            {
+                pAli.SocieteId = pomodoro.Id;
+            }
+
+            var pomoSite = await _db.SitesUsines.IgnoreQueryFilters().FirstOrDefaultAsync(s => s.SocieteId == pomodoro.Id);
+            if (pomoSite == null)
+            {
+                _db.SitesUsines.Add(new SiteUsine
+                {
+                    SocieteId = pomodoro.Id,
+                    Nom = "Usine Nabeul Principale",
+                    CodeSite = "NAB-01",
+                    Ville = "Nabeul",
+                    Gouvernorat = "Nabeul",
+                    Adresse = "Zone Industrielle Nabeul 8000",
+                    Type = "Usine de Transformation Tomates",
+                    Statut = "Opérationnel",
+                    CapaciteProduction = "400 T/jour",
+                    NombreEquipements = 52,
+                    NombreUtilisateurs = 18,
+                    Responsable = "Ing. Sarah Mansouri",
+                    Telephone = "+216 72 285 100",
+                    Email = "sarah.mansouri@pomodoro.tn"
+                });
+            }
+        }
+
+        var sicamTenant = await _db.Societes.IgnoreQueryFilters().FirstOrDefaultAsync(s => s.CodeTenant == "agro-sicam");
+        if (sicamTenant != null && !await _db.Users.IgnoreQueryFilters().AnyAsync(u => u.SocieteId == sicamTenant.Id))
+        {
+            _db.Users.AddRange(
+                new User
+                {
+                    Nom = "Ben Amor",
+                    Prenom = "Mohamed",
+                    Email = "mohamed.benamor@sicam.com.tn",
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword("Sicam2026!"),
+                    Telephone = "+216 71 450 120",
+                    RoleId = 1,
+                    SocieteId = sicamTenant.Id,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow.AddMonths(-10)
+                },
+                new User
+                {
+                    Nom = "Ben Salah",
+                    Prenom = "Karim",
+                    Email = "karim.bensalah@sicam.com.tn",
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword("Sicam2026!"),
+                    Telephone = "+216 72 450 120",
+                    RoleId = 2,
+                    SocieteId = sicamTenant.Id,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow.AddMonths(-8)
+                }
+            );
+        }
+
+        var carthageTenant = await _db.Societes.IgnoreQueryFilters().FirstOrDefaultAsync(s => s.CodeTenant == "conserverie-carthage");
+        if (carthageTenant != null && !await _db.Users.IgnoreQueryFilters().AnyAsync(u => u.SocieteId == carthageTenant.Id))
+        {
+            _db.Users.AddRange(
+                new User
+                {
+                    Nom = "Trabelsi",
+                    Prenom = "Sonia",
+                    Email = "sonia.trabelsi@conserverie-carthage.tn",
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword("Carthage2026!"),
+                    Telephone = "+216 72 230 400",
+                    RoleId = 1,
+                    SocieteId = carthageTenant.Id,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow.AddMonths(-9)
+                },
+                new User
+                {
+                    Nom = "Trad",
+                    Prenom = "Walid",
+                    Email = "walid.trad@carthage.tn",
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword("Carthage2026!"),
+                    Telephone = "+216 72 388 900",
+                    RoleId = 2,
+                    SocieteId = carthageTenant.Id,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow.AddMonths(-7)
+                }
+            );
+        }
+
+        var sfbtTenant = await _db.Societes.IgnoreQueryFilters().FirstOrDefaultAsync(s => s.CodeTenant == "sfbt-group");
+        if (sfbtTenant != null && !await _db.Users.IgnoreQueryFilters().AnyAsync(u => u.SocieteId == sfbtTenant.Id))
+        {
+            _db.Users.AddRange(
+                new User
+                {
+                    Nom = "Dridi",
+                    Prenom = "Kamel",
+                    Email = "kamel.dridi@sfbt.com.tn",
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword("Sfbt2026!"),
+                    Telephone = "+216 71 800 200",
+                    RoleId = 1,
+                    SocieteId = sfbtTenant.Id,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow.AddMonths(-18)
+                },
+                new User
+                {
+                    Nom = "Zouari",
+                    Prenom = "Sami",
+                    Email = "sami.zouari@sfbt.com.tn",
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword("Sfbt2026!"),
+                    Telephone = "+216 71 800 240",
+                    RoleId = 2,
+                    SocieteId = sfbtTenant.Id,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow.AddMonths(-12)
+                },
+                new User
+                {
+                    Nom = "Jlassi",
+                    Prenom = "Anis",
+                    Email = "anis.jlassi@sfbt.com.tn",
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword("Sfbt2026!"),
+                    Telephone = "+216 71 295 400",
+                    RoleId = 4,
+                    SocieteId = sfbtTenant.Id,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow.AddMonths(-10)
+                }
+            );
+        }
+
+        var huilerieTenant = await _db.Societes.IgnoreQueryFilters().FirstOrDefaultAsync(s => s.CodeTenant == "huilerie-sahel");
+        if (huilerieTenant != null && !await _db.Users.IgnoreQueryFilters().AnyAsync(u => u.SocieteId == huilerieTenant.Id))
+        {
+            _db.Users.Add(
+                new User
+                {
+                    Nom = "Bouzid",
+                    Prenom = "Rached",
+                    Email = "rached.bouzid@huilerie-sahel.tn",
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword("Huilerie2026!"),
+                    Telephone = "+216 73 550 310",
+                    RoleId = 1,
+                    SocieteId = huilerieTenant.Id,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow.AddMonths(-6)
+                }
+            );
+        }
+
+        var fromagerieTenant = await _db.Societes.IgnoreQueryFilters().FirstOrDefaultAsync(s => s.CodeTenant == "fromagerie-domaines");
+        if (fromagerieTenant != null && !await _db.Users.IgnoreQueryFilters().AnyAsync(u => u.SocieteId == fromagerieTenant.Id))
+        {
+            _db.Users.Add(
+                new User
+                {
+                    Nom = "Mansouri",
+                    Prenom = "Inès",
+                    Email = "ines.mansouri@fromagerie-domaines.tn",
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword("Fromagerie2026!"),
+                    Telephone = "+216 78 450 780",
+                    RoleId = 1,
+                    SocieteId = fromagerieTenant.Id,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow.AddMonths(-3)
+                }
+            );
+        }
+
+        await _db.SaveChangesAsync();
     }
 }
 
