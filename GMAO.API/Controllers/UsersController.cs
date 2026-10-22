@@ -28,6 +28,19 @@ public class UsersController : ControllerBase
     public async Task<IActionResult> GetAllUsers()
     {
         var users = await _userRepository.GetAllAsync();
+
+        // Le SuperAdmin ne doit jamais apparaître dans l'espace Admin d'une société
+        var isSuperAdmin = User.IsInRole("SuperAdmin");
+        if (!isSuperAdmin)
+        {
+            var societeIdClaim = User.FindFirst("SocieteId")?.Value;
+            int? societeId = int.TryParse(societeIdClaim, out int sid) ? sid : null;
+
+            users = users.Where(u => u.Role?.Nom != "SuperAdmin" 
+                                  && u.RoleId != 7 
+                                  && (societeId == null || u.SocieteId == societeId));
+        }
+
         return Ok(users);
     }
 
@@ -69,6 +82,12 @@ public class UsersController : ControllerBase
         var user = await _userRepository.GetByIdAsync(id);
         if (user == null) return NotFound(new { message = "Utilisateur non trouvé" });
 
+        if (user.RoleId == 7 || user.Role?.Nom == "SuperAdmin")
+        {
+            if (!User.IsInRole("SuperAdmin"))
+                return Forbid();
+        }
+
         if (!string.IsNullOrEmpty(dto.Nom)) user.Nom = dto.Nom;
         if (!string.IsNullOrEmpty(dto.Prenom)) user.Prenom = dto.Prenom;
         if (!string.IsNullOrEmpty(dto.Email)) user.Email = dto.Email;
@@ -90,6 +109,12 @@ public class UsersController : ControllerBase
 
         var user = await _userRepository.GetByIdAsync(id);
         if (user == null) return NotFound(new { message = "Utilisateur non trouvé" });
+
+        if (user.RoleId == 7 || user.Role?.Nom == "SuperAdmin")
+        {
+            if (!User.IsInRole("SuperAdmin"))
+                return Forbid();
+        }
 
         await _userRepository.DeleteAsync(user);
         return Ok(new { message = "Utilisateur supprimé avec succès." });
