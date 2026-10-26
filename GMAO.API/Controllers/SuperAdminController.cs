@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using GMAO.Domain.Entities;
 using GMAO.Infrastructure.Data;
+using GMAO.Application.Services;
 
 namespace GMAO.API.Controllers;
 
@@ -184,10 +185,22 @@ public class SuperAdminController : ControllerBase
     [HttpPost("tenants")]
     public async Task<IActionResult> CreateTenant([FromBody] Societe tenant)
     {
-        if (string.IsNullOrWhiteSpace(tenant.Nom)) return BadRequest("Le nom de l'entreprise est obligatoire.");
+        if (string.IsNullOrWhiteSpace(tenant.Nom)) return BadRequest(new { message = "Le nom de l'entreprise est obligatoire." });
         if (string.IsNullOrWhiteSpace(tenant.CodeTenant))
         {
             tenant.CodeTenant = tenant.Nom.ToLower().Replace(" ", "-").Replace("'", "");
+        }
+        else
+        {
+            tenant.CodeTenant = tenant.CodeTenant.Trim().ToLower().Replace(" ", "-");
+        }
+
+        // Prevent unique constraint clash
+        var baseCode = tenant.CodeTenant;
+        int counter = 1;
+        while (await _db.Societes.IgnoreQueryFilters().AnyAsync(s => s.CodeTenant == tenant.CodeTenant))
+        {
+            tenant.CodeTenant = $"{baseCode}-{counter++}";
         }
 
         tenant.CreatedAt = DateTime.UtcNow;
@@ -201,6 +214,145 @@ public class SuperAdminController : ControllerBase
         await LogAuditAsync("Création Entreprise", "Tenant", $"Nouvelle entreprise enregistrée: {tenant.Nom} ({tenant.SubscriptionPlan})");
 
         return CreatedAtAction(nameof(GetTenantById), new { id = tenant.Id }, tenant);
+    }
+
+    [HttpPost("tenants-with-admin")]
+    public async Task<IActionResult> CreateTenantWithAdmin([FromBody] TenantWithAdminDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Nom))
+            return BadRequest(new { message = "Le nom de l'entreprise est obligatoire." });
+
+        var code = string.IsNullOrWhiteSpace(dto.CodeTenant)
+            ? dto.Nom.ToLower().Replace(" ", "-").Replace("'", "")
+            : dto.CodeTenant.Trim().ToLower().Replace(" ", "-");
+
+        var cleanCode = System.Text.RegularExpressions.Regex.Replace(code, @"[^a-z0-9\-]", "");
+        if (string.IsNullOrWhiteSpace(cleanCode)) cleanCode = $"tenant-{DateTime.UtcNow.Ticks % 100000}";
+
+        var baseCode = cleanCode;
+        int counter = 1;
+        while (await _db.Societes.IgnoreQueryFilters().AnyAsync(s => s.CodeTenant == cleanCode))
+        {
+            cleanCode = $"{baseCode}-{counter++}";
+        }
+
+        string? adminEmailNorm = null;
+        if (!string.IsNullOrWhiteSpace(dto.AdminEmail))
+        {
+            adminEmailNorm = dto.AdminEmail.Trim().ToLower();
+            var existingUser = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Email.ToLower() == adminEmailNorm);
+            if (existingUser != null)
+            {
+                return BadRequest(new { message = $"L'adresse email '{dto.AdminEmail}' est déjà utilisée par un autre compte utilisateur." });
+            }
+        }
+
+        using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            var tenant = new Societe
+            {
+                Nom = dto.Nom.Trim(),
+                CodeTenant = cleanCode,
+                Category = dto.Category ?? "Agroalimentaire & Transformation",
+                ManagerNom = dto.ManagerNom ?? $"{dto.AdminPrenom} {dto.AdminNom}".Trim(),
+                Telephone = dto.Telephone ?? dto.AdminTelephone,
+                Ville = dto.Ville ?? "Nabeul",
+                Gouvernorat = dto.Gouvernorat ?? "Tunisie",
+                Adresse = dto.Adresse ?? $"{dto.Ville}, {dto.Gouvernorat}",
+                EmailContact = dto.EmailContact ?? adminEmailNorm,
+                SubscriptionPlan = dto.SubscriptionPlan ?? "Basic",
+                SubscriptionStatus = dto.SubscriptionStatus ?? "Actif",
+                SubscriptionAmount = dto.SubscriptionAmount,
+                SubscriptionStartDate = DateTime.UtcNow,
+                SubscriptionEndDate = DateTime.UtcNow.AddYears(1),
+                MaxSites = dto.MaxSites > 0 ? dto.MaxSites : 3,
+                MaxUsers = dto.MaxUsers > 0 ? dto.MaxUsers : 25,
+                MaxEquipements = dto.MaxEquipements > 0 ? dto.MaxEquipements : 150,
+                MaxStorageGb = dto.MaxStorageGb > 0 ? dto.MaxStorageGb : 50.0,
+                CapacityTonsPerDay = dto.CapacityTonsPerDay > 0 ? dto.CapacityTonsPerDay : 450,
+                IsActive = dto.IsActive,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            _db.Societes.Add(tenant);
+            await _db.SaveChangesAsync();
+
+            User? adminUser = null;
+            if (!string.IsNullOrWhiteSpace(adminEmailNorm))
+            {
+                var rawPassword = !string.IsNullOrWhiteSpace(dto.AdminPassword) ? dto.AdminPassword : "Gmao2026!";
+                adminUser = new User
+                {
+                    Nom = !string.IsNullOrWhiteSpace(dto.AdminNom) ? dto.AdminNom.Trim() : dto.Nom.Trim(),
+                    Prenom = !string.IsNullOrWhiteSpace(dto.AdminPrenom) ? dto.AdminPrenom.Trim() : "Admin",
+                    Email = adminEmailNorm,
+                    PasswordHash = PasswordHasher.HashPassword(rawPassword),
+                    Telephone = dto.AdminTelephone ?? dto.Telephone,
+                    RoleId = 1, // Administrateur d'entreprise
+                    SocieteId = tenant.Id,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                _db.Users.Add(adminUser);
+                await _db.SaveChangesAsync();
+            }
+
+            var defaultSite = new SiteUsine
+            {
+                SocieteId = tenant.Id,
+                Nom = $"Site Principal - {tenant.Nom}",
+                CodeSite = $"SITE-{tenant.Id:D3}-01",
+                Ville = tenant.Ville ?? "Tunis",
+                Gouvernorat = tenant.Gouvernorat ?? "Tunisie",
+                Adresse = tenant.Adresse ?? "Zone Industrielle",
+                Statut = "Opérationnel",
+                Type = "Transformation",
+                Responsable = adminUser != null ? $"{adminUser.Prenom} {adminUser.Nom}" : tenant.ManagerNom ?? "Direction",
+                Email = adminUser?.Email ?? tenant.EmailContact,
+                Telephone = adminUser?.Telephone ?? tenant.Telephone,
+                CreatedAt = DateTime.UtcNow
+            };
+            _db.SitesUsines.Add(defaultSite);
+            await _db.SaveChangesAsync();
+
+            await LogAuditAsync("Création Entreprise", "Tenant", $"Nouvelle entreprise enregistrée: {tenant.Nom} avec compte Admin {adminUser?.Email}");
+
+            await tx.CommitAsync();
+
+            return Ok(new
+            {
+                tenant = new
+                {
+                    tenant.Id,
+                    tenant.Nom,
+                    tenant.CodeTenant,
+                    tenant.Category,
+                    tenant.EmailContact,
+                    tenant.SubscriptionPlan,
+                    tenant.SubscriptionStatus,
+                    tenant.IsActive,
+                    tenant.CreatedAt
+                },
+                admin = adminUser != null ? new
+                {
+                    adminUser.Id,
+                    adminUser.Nom,
+                    adminUser.Prenom,
+                    adminUser.Email,
+                    adminUser.RoleId,
+                    adminUser.SocieteId,
+                    adminUser.IsActive
+                } : null,
+                message = "Entreprise et administrateur créés avec succès."
+            });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return BadRequest(new { message = $"Erreur lors de la création : {ex.Message}" });
+        }
     }
 
     [HttpPut("tenants/{id}")]
@@ -516,15 +668,24 @@ public class SuperAdminController : ControllerBase
     [HttpPost("users")]
     public async Task<IActionResult> CreateUser([FromBody] UserCreateDto dto)
     {
-        if (string.IsNullOrWhiteSpace(dto.Email)) return BadRequest("L'email est requis.");
-        if (string.IsNullOrWhiteSpace(dto.Nom)) return BadRequest("Le nom est requis.");
+        if (string.IsNullOrWhiteSpace(dto.Email)) return BadRequest(new { message = "L'adresse email est requise." });
+        if (string.IsNullOrWhiteSpace(dto.Nom)) return BadRequest(new { message = "Le nom est requis." });
+
+        var emailNorm = dto.Email.Trim().ToLower();
+        var existing = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Email.ToLower() == emailNorm);
+        if (existing != null)
+        {
+            return BadRequest(new { message = $"L'adresse email '{dto.Email}' est déjà utilisée par un autre compte." });
+        }
+
+        var rawPassword = !string.IsNullOrWhiteSpace(dto.Password) ? dto.Password : "Gmao2026!";
 
         var user = new User
         {
-            Nom = dto.Nom,
-            Prenom = dto.Prenom ?? "",
-            Email = dto.Email,
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword("Gmao2026!"),
+            Nom = dto.Nom.Trim(),
+            Prenom = (dto.Prenom ?? "").Trim(),
+            Email = emailNorm,
+            PasswordHash = PasswordHasher.HashPassword(rawPassword),
             Telephone = dto.Telephone,
             RoleId = dto.RoleId > 0 ? dto.RoleId : 1,
             SocieteId = dto.SocieteId > 0 ? dto.SocieteId : null,
@@ -543,15 +704,32 @@ public class SuperAdminController : ControllerBase
     public async Task<IActionResult> UpdateUser(int id, [FromBody] UserUpdateDto dto)
     {
         var user = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == id);
-        if (user == null) return NotFound();
+        if (user == null) return NotFound(new { message = "Utilisateur non trouvé." });
 
-        user.Nom = dto.Nom ?? user.Nom;
-        user.Prenom = dto.Prenom ?? user.Prenom;
-        user.Email = dto.Email ?? user.Email;
+        if (!string.IsNullOrWhiteSpace(dto.Email))
+        {
+            var emailNorm = dto.Email.Trim().ToLower();
+            if (emailNorm != user.Email.ToLower())
+            {
+                var existing = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id != id && u.Email.ToLower() == emailNorm);
+                if (existing != null)
+                {
+                    return BadRequest(new { message = $"L'adresse email '{dto.Email}' est déjà utilisée." });
+                }
+                user.Email = emailNorm;
+            }
+        }
+
+        user.Nom = dto.Nom?.Trim() ?? user.Nom;
+        user.Prenom = dto.Prenom?.Trim() ?? user.Prenom;
         user.Telephone = dto.Telephone ?? user.Telephone;
         if (dto.RoleId > 0) user.RoleId = dto.RoleId;
         if (dto.SocieteId.HasValue) user.SocieteId = dto.SocieteId.Value > 0 ? dto.SocieteId.Value : null;
         user.IsActive = dto.IsActive;
+        if (!string.IsNullOrWhiteSpace(dto.Password))
+        {
+            user.PasswordHash = PasswordHasher.HashPassword(dto.Password);
+        }
 
         await _db.SaveChangesAsync();
         await LogAuditAsync("Modification Utilisateur", "Auth", $"Utilisateur modifié: {user.Email}");
@@ -1635,6 +1813,7 @@ public class UserCreateDto
     public string Nom { get; set; } = string.Empty;
     public string? Prenom { get; set; }
     public string Email { get; set; } = string.Empty;
+    public string? Password { get; set; }
     public string? Telephone { get; set; }
     public int RoleId { get; set; }
     public int? SocieteId { get; set; }
@@ -1646,8 +1825,38 @@ public class UserUpdateDto
     public string? Nom { get; set; }
     public string? Prenom { get; set; }
     public string? Email { get; set; }
+    public string? Password { get; set; }
     public string? Telephone { get; set; }
     public int RoleId { get; set; }
     public int? SocieteId { get; set; }
     public bool IsActive { get; set; } = true;
+}
+
+public class TenantWithAdminDto
+{
+    public string Nom { get; set; } = string.Empty;
+    public string? CodeTenant { get; set; }
+    public string? Category { get; set; }
+    public string? ManagerNom { get; set; }
+    public string? Telephone { get; set; }
+    public string? Ville { get; set; }
+    public string? Gouvernorat { get; set; }
+    public string? Adresse { get; set; }
+    public string? EmailContact { get; set; }
+    public string? SubscriptionPlan { get; set; }
+    public string? SubscriptionStatus { get; set; }
+    public decimal SubscriptionAmount { get; set; }
+    public int MaxSites { get; set; }
+    public int MaxUsers { get; set; }
+    public int MaxEquipements { get; set; }
+    public double MaxStorageGb { get; set; }
+    public int CapacityTonsPerDay { get; set; }
+    public bool IsActive { get; set; } = true;
+
+    // Admin Account fields
+    public string? AdminNom { get; set; }
+    public string? AdminPrenom { get; set; }
+    public string? AdminEmail { get; set; }
+    public string? AdminPassword { get; set; }
+    public string? AdminTelephone { get; set; }
 }

@@ -31,7 +31,8 @@ public class AuthService : IAuthService
 
     public async Task<AuthResponseDto> LoginAsync(string email, string password)
     {
-        var user = await _userRepository.GetByEmailAsync(email);
+        var normalizedEmail = (email ?? "").Trim();
+        var user = await _userRepository.GetByEmailAsync(normalizedEmail);
         if (user == null || !user.IsActive)
             throw new Exception("Identifiants incorrects ou compte inactif.");
 
@@ -132,6 +133,7 @@ public class AuthService : IAuthService
 
     public async Task<User> RegisterAsync(User user, string password)
     {
+        user.Email = (user.Email ?? "").Trim().ToLower();
         var existingUser = await _userRepository.GetByEmailAsync(user.Email);
         if (existingUser != null)
         {

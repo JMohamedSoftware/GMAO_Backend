@@ -24,12 +24,15 @@ public class UserRepository : GenericRepository<User>, IUserRepository
 
     public async Task<User?> GetByEmailAsync(string email)
     {
+        if (string.IsNullOrWhiteSpace(email)) return null;
+        var normalized = email.Trim().ToLower();
+
         return await _context.Users
             .Include(u => u.Role)
                 .ThenInclude(r => r.RolePermissions)
             .Include(u => u.Societe)
             .Include(u => u.TechnicienCompetences)
                 .ThenInclude(tc => tc.Competence)
-            .FirstOrDefaultAsync(u => u.Email == email);
+            .FirstOrDefaultAsync(u => u.Email.ToLower() == normalized);
     }
 }
