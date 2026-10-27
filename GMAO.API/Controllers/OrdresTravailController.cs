@@ -1,3 +1,5 @@
+using System;
+using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
@@ -23,6 +25,14 @@ public class OrdresTravailController : ControllerBase
         _incidentRepository = incidentRepository;
     }
 
+    private int GetSocieteId()
+    {
+        var societeIdClaim = User.FindFirst("SocieteId")?.Value;
+        if (int.TryParse(societeIdClaim, out int societeId) && societeId > 0)
+            return societeId;
+        return 1;
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
@@ -39,12 +49,36 @@ public class OrdresTravailController : ControllerBase
     }
 
     /// <summary>
-    /// Creates a new work order. If demandeId is provided, also sets the
-    /// corresponding incident status to TransformeeEnOT (4).
+    /// Creates a new work order. Auto-generates a clean sequential NumeroOT
+    /// (e.g. OT-2026-001) scoped strictly to the authenticated company.
+    /// If demandeId is provided, also sets the corresponding incident status to TransformeeEnOT (4).
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] OrdresTravail ordre)
     {
+        int societeId = GetSocieteId();
+        ordre.SocieteId = societeId;
+
+        // Auto-generate clean sequential NumeroOT per company and per year (OT-2026-001, OT-2026-002...)
+        int currentYear = DateTime.UtcNow.Year;
+        string yearPrefix = $"OT-{currentYear}-";
+
+        var existingOts = await _repository.GetAllAsync();
+        int maxSeq = 0;
+        foreach (var o in existingOts)
+        {
+            if (!string.IsNullOrEmpty(o.NumeroOT) && o.NumeroOT.StartsWith(yearPrefix))
+            {
+                var numPart = o.NumeroOT.Substring(yearPrefix.Length);
+                if (int.TryParse(numPart, out int s) && s > maxSeq)
+                {
+                    maxSeq = s;
+                }
+            }
+        }
+
+        ordre.NumeroOT = $"{yearPrefix}{(maxSeq + 1):D3}";
+
         await _repository.AddAsync(ordre);
 
         // Auto-transition the linked incident to "Transformée en OT"

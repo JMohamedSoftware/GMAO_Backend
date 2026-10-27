@@ -19,6 +19,14 @@ public class IncidentsController : ControllerBase
         _repository = repository;
     }
 
+    private int GetSocieteId()
+    {
+        var societeIdClaim = User.FindFirst("SocieteId")?.Value;
+        if (int.TryParse(societeIdClaim, out int societeId) && societeId > 0)
+            return societeId;
+        return 1;
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
@@ -37,6 +45,7 @@ public class IncidentsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] DemandeIntervention incident)
     {
+        incident.SocieteId = GetSocieteId();
         await _repository.AddAsync(incident);
         return CreatedAtAction(nameof(GetById), new { id = incident.Id }, incident);
     }

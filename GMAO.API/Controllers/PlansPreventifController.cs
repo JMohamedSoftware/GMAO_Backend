@@ -207,6 +207,7 @@ public class PlansPreventifController : ControllerBase
         var ot = new OrdresTravail
         {
             NumeroOT        = $"OT-PRV-{now.Year}-{plan.Id}-{now.Ticks % 10000}",
+            SocieteId       = int.TryParse(User.FindFirst("SocieteId")?.Value, out int sId) && sId > 0 ? sId : (plan.Equipement?.SocieteId ?? 1),
             EquipementId    = plan.EquipementId,
             ResponsableId   = responsableId,
             TypeMaintenance = TypeMaintenance.Preventive,
