@@ -787,9 +787,14 @@ namespace GMAO.Infrastructure.Data.Migrations
                     b.Property<int?>("ParentId")
                         .HasColumnType("integer");
 
+                    b.Property<int>("SocieteId")
+                        .HasColumnType("integer");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ParentId");
+
+                    b.HasIndex("SocieteId");
 
                     b.ToTable("Localisations", (string)null);
 
@@ -798,49 +803,57 @@ namespace GMAO.Infrastructure.Data.Migrations
                         {
                             Id = 1,
                             Description = "Site principal",
-                            Nom = "Usine"
+                            Nom = "Usine",
+                            SocieteId = 1
                         },
                         new
                         {
                             Id = 2,
                             Nom = "Réception",
-                            ParentId = 1
+                            ParentId = 1,
+                            SocieteId = 1
                         },
                         new
                         {
                             Id = 3,
                             Nom = "Lavage",
-                            ParentId = 1
+                            ParentId = 1,
+                            SocieteId = 1
                         },
                         new
                         {
                             Id = 4,
                             Nom = "Tri",
-                            ParentId = 1
+                            ParentId = 1,
+                            SocieteId = 1
                         },
                         new
                         {
                             Id = 5,
                             Nom = "Concentration",
-                            ParentId = 1
+                            ParentId = 1,
+                            SocieteId = 1
                         },
                         new
                         {
                             Id = 6,
                             Nom = "Conditionnement",
-                            ParentId = 1
+                            ParentId = 1,
+                            SocieteId = 1
                         },
                         new
                         {
                             Id = 7,
                             Nom = "Stockage",
-                            ParentId = 1
+                            ParentId = 1,
+                            SocieteId = 1
                         },
                         new
                         {
                             Id = 8,
                             Nom = "Utilités",
-                            ParentId = 1
+                            ParentId = 1,
+                            SocieteId = 1
                         });
                 });
 
@@ -1856,7 +1869,15 @@ namespace GMAO.Infrastructure.Data.Migrations
                         .HasForeignKey("ParentId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("GMAO.Domain.Entities.Societe", "Societe")
+                        .WithMany()
+                        .HasForeignKey("SocieteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.Navigation("Parent");
+
+                    b.Navigation("Societe");
                 });
 
             modelBuilder.Entity("GMAO.Domain.Entities.MouvementStock", b =>
