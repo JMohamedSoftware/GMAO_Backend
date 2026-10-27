@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
@@ -15,7 +15,7 @@ namespace GMAO.Infrastructure.Data.Migrations
                 table: "Localisations",
                 type: "integer",
                 nullable: false,
-                defaultValue: 0);
+                defaultValue: 1);
 
             migrationBuilder.UpdateData(
                 table: "Localisations",

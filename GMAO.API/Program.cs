@@ -143,12 +143,44 @@ try
 {
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<GmaoDbContext>();
+
+    try
+    {
+        db.Database.ExecuteSqlRaw(@"
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Localisations' AND column_name='SocieteId') THEN
+                    ALTER TABLE ""Localisations"" ADD COLUMN ""SocieteId"" integer NOT NULL DEFAULT 1;
+                    BEGIN
+                        ALTER TABLE ""Localisations"" ADD CONSTRAINT ""FK_Localisations_Societes_SocieteId"" 
+                            FOREIGN KEY (""SocieteId"") REFERENCES ""Societes"" (""Id"") ON DELETE CASCADE;
+                    EXCEPTION WHEN OTHERS THEN NULL;
+                    END;
+                END IF;
+
+                IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Equipements' AND column_name='LocalisationId' AND is_nullable='NO') THEN
+                    ALTER TABLE ""Equipements"" ALTER COLUMN ""LocalisationId"" DROP NOT NULL;
+                    BEGIN
+                        ALTER TABLE ""Equipements"" DROP CONSTRAINT IF EXISTS ""FK_Equipements_Localisations_LocalisationId"";
+                        ALTER TABLE ""Equipements"" ADD CONSTRAINT ""FK_Equipements_Localisations_LocalisationId"" 
+                            FOREIGN KEY (""LocalisationId"") REFERENCES ""Localisations"" (""Id"") ON DELETE SET NULL;
+                    EXCEPTION WHEN OTHERS THEN NULL;
+                    END;
+                END IF;
+            END $$;
+        ");
+    }
+    catch (Exception sqlEx)
+    {
+        Console.WriteLine($"⚠️ Direct SQL schema update warning: {sqlEx.Message}");
+    }
+
     db.Database.Migrate();
     Console.WriteLine("✅ Database migration completed successfully.");
 }
 catch (Exception ex)
 {
-    Console.WriteLine($"⚠️ Database migration failed: {ex.Message}");
+    Console.WriteLine($"⚠️ Database migration failed: {ex.Message} -> {ex.InnerException?.Message}");
     Console.WriteLine("The application will continue without migration.");
 }
 
