@@ -41,7 +41,7 @@ namespace GMAO.Infrastructure.Services
 
         public async Task<Localisation?> UpdateAsync(int id, Localisation localisation)
         {
-            var existingLocalisation = await _context.Localisations.FindAsync(id);
+            var existingLocalisation = await _context.Localisations.FirstOrDefaultAsync(l => l.Id == id);
             if (existingLocalisation == null) return null;
 
             existingLocalisation.Nom = localisation.Nom;

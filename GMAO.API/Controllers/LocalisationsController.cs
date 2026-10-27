@@ -19,6 +19,14 @@ namespace GMAO.API.Controllers
             _localisationService = localisationService;
         }
 
+        private int GetSocieteId()
+        {
+            var societeIdClaim = User.FindFirst("SocieteId")?.Value;
+            if (int.TryParse(societeIdClaim, out int societeId) && societeId > 0)
+                return societeId;
+            return 1;
+        }
+
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Localisation>>> GetAll()
         {
@@ -46,6 +54,7 @@ namespace GMAO.API.Controllers
         [HttpPost]
         public async Task<ActionResult<Localisation>> Create(Localisation localisation)
         {
+            localisation.SocieteId = GetSocieteId();
             var created = await _localisationService.CreateAsync(localisation);
             return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
         }

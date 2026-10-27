@@ -108,6 +108,9 @@ public class GmaoDbContext : DbContext
         modelBuilder.Entity<Facture>()
             .HasQueryFilter(f => _isSuperAdmin || _currentSocieteId == null || f.SocieteId == _currentSocieteId);
 
+        modelBuilder.Entity<Localisation>()
+            .HasQueryFilter(l => _isSuperAdmin || _currentSocieteId == null || l.SocieteId == _currentSocieteId);
+
         // ── Relations Equipe ─────────────────────────────────────────────────
         modelBuilder.Entity<Equipe>()
             .HasOne(e => e.ChefEquipe)
