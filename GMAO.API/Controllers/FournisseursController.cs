@@ -18,6 +18,14 @@ public class FournisseursController : ControllerBase
         _repository = repository;
     }
 
+    private int GetSocieteId()
+    {
+        var societeIdClaim = User.FindFirst("SocieteId")?.Value;
+        if (int.TryParse(societeIdClaim, out int societeId) && societeId > 0)
+            return societeId;
+        return 1;
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
@@ -36,6 +44,15 @@ public class FournisseursController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Fournisseur fournisseur)
     {
+        if (string.IsNullOrWhiteSpace(fournisseur.Nom))
+            return BadRequest(new { message = "Le nom du fournisseur est obligatoire." });
+
+        fournisseur.SocieteId = GetSocieteId();
+        if (string.IsNullOrWhiteSpace(fournisseur.Code))
+        {
+            fournisseur.Code = $"FRN-{DateTime.UtcNow.Ticks % 10000:D4}";
+        }
+
         await _repository.AddAsync(fournisseur);
         return CreatedAtAction(nameof(GetById), new { id = fournisseur.Id }, fournisseur);
     }
@@ -48,8 +65,15 @@ public class FournisseursController : ControllerBase
         var existing = await _repository.GetByIdAsync(id);
         if (existing == null) return NotFound();
 
-        await _repository.UpdateAsync(fournisseur);
-        return NoContent();
+        existing.Nom = fournisseur.Nom;
+        existing.Contact = fournisseur.Contact;
+        existing.Telephone = fournisseur.Telephone;
+        existing.Email = fournisseur.Email;
+        existing.Adresse = fournisseur.Adresse;
+        existing.IsActive = fournisseur.IsActive;
+
+        await _repository.UpdateAsync(existing);
+        return Ok(existing);
     }
 
     [HttpDelete("{id}")]
