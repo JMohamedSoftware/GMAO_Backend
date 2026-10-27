@@ -13,31 +13,52 @@ namespace GMAO.API.Controllers
     public class LocalisationsController : ControllerBase
     {
         private readonly ILocalisationService _localisationService;
+        private readonly GMAO.Infrastructure.Data.GmaoDbContext _context;
 
-        public LocalisationsController(ILocalisationService localisationService)
+        public LocalisationsController(
+            ILocalisationService localisationService,
+            GMAO.Infrastructure.Data.GmaoDbContext context)
         {
             _localisationService = localisationService;
+            _context = context;
         }
 
-        private int GetSocieteId()
+        private int? GetTargetSocieteId()
         {
+            if (Request.Headers.TryGetValue("X-Tenant-Id", out var tenantHeader))
+            {
+                var val = tenantHeader.ToString();
+                if (!string.IsNullOrEmpty(val) && val != "null" && val != "undefined")
+                {
+                    if (int.TryParse(val, out int sid) && sid > 0) return sid;
+                    var soc = _context.Societes.FirstOrDefault(s => s.CodeTenant == val);
+                    if (soc != null) return soc.Id;
+                }
+            }
+
             var societeIdClaim = User.FindFirst("SocieteId")?.Value;
-            if (int.TryParse(societeIdClaim, out int societeId) && societeId > 0)
-                return societeId;
+            if (int.TryParse(societeIdClaim, out int claimId) && claimId > 0)
+                return claimId;
+
+            if (User.IsInRole("SuperAdmin"))
+                return null;
+
             return 1;
         }
 
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Localisation>>> GetAll()
         {
-            var localisations = await _localisationService.GetAllAsync();
+            var targetSid = GetTargetSocieteId();
+            var localisations = await _localisationService.GetAllAsync(targetSid);
             return Ok(localisations);
         }
 
         [HttpGet("tree")]
         public async Task<ActionResult<IEnumerable<Localisation>>> GetTree()
         {
-            var tree = await _localisationService.GetTreeAsync();
+            var targetSid = GetTargetSocieteId();
+            var tree = await _localisationService.GetTreeAsync(targetSid);
             return Ok(tree);
         }
 
@@ -54,7 +75,8 @@ namespace GMAO.API.Controllers
         [HttpPost]
         public async Task<ActionResult<Localisation>> Create(Localisation localisation)
         {
-            localisation.SocieteId = GetSocieteId();
+            var targetSid = GetTargetSocieteId();
+            localisation.SocieteId = targetSid ?? 1;
             var created = await _localisationService.CreateAsync(localisation);
             return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
         }
@@ -74,7 +96,7 @@ namespace GMAO.API.Controllers
         {
             var success = await _localisationService.DeleteAsync(id);
             if (!success)
-                return BadRequest("Impossible de supprimer cette localisation (elle contient peut-être des équipements ou des sous-localisations).");
+                return NotFound();
                 
             return NoContent();
         }

@@ -9,7 +9,7 @@ public class Equipement
     public string Code { get; set; } = string.Empty;
     public string Designation { get; set; } = string.Empty;
     public int FamilleId { get; set; }
-    public int LocalisationId { get; set; }
+    public int? LocalisationId { get; set; }
     public string? Marque { get; set; }
     public string? Modele { get; set; }
     public string? NumeroSerie { get; set; }
@@ -27,7 +27,7 @@ public class Equipement
     // Navigation
     public Societe Societe { get; set; } = null!;
     public Famille Famille { get; set; } = null!;
-    public Localisation Localisation { get; set; } = null!;
+    public Localisation? Localisation { get; set; }
     public Fournisseur? Fournisseur { get; set; }
     public ICollection<DemandeIntervention> DemandesIntervention { get; set; } = new List<DemandeIntervention>();
     public ICollection<OrdresTravail> OrdresTravail { get; set; } = new List<OrdresTravail>();

@@ -29,7 +29,7 @@ public class LocalisationConfiguration : IEntityTypeConfiguration<Localisation>
         entity.HasMany(l => l.Equipements)
               .WithOne(e => e.Localisation)
               .HasForeignKey(e => e.LocalisationId)
-              .OnDelete(DeleteBehavior.Restrict);
+              .OnDelete(DeleteBehavior.SetNull);
 
         // ── Localisation → Societe (Many-to-One) ──────────────────────────────
         entity.HasOne(l => l.Societe)

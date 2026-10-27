@@ -10,7 +10,7 @@ public class EquipementDto
     public string Designation { get; set; } = string.Empty;
     public int FamilleId { get; set; }
     public string FamilleNom { get; set; } = string.Empty;
-    public int LocalisationId { get; set; }
+    public int? LocalisationId { get; set; }
     public string LocalisationNom { get; set; } = string.Empty;
     public string? Marque { get; set; }
     public string? Modele { get; set; }

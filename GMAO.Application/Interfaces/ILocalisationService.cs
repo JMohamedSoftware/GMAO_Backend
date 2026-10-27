@@ -6,11 +6,11 @@ namespace GMAO.Application.Interfaces
 {
     public interface ILocalisationService
     {
-        Task<IEnumerable<Localisation>> GetAllAsync();
+        Task<IEnumerable<Localisation>> GetAllAsync(int? societeId = null);
         Task<Localisation?> GetByIdAsync(int id);
         Task<Localisation> CreateAsync(Localisation localisation);
         Task<Localisation?> UpdateAsync(int id, Localisation localisation);
         Task<bool> DeleteAsync(int id);
-        Task<IEnumerable<Localisation>> GetTreeAsync();
+        Task<IEnumerable<Localisation>> GetTreeAsync(int? societeId = null);
     }
 }

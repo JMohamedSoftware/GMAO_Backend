@@ -315,7 +315,7 @@ namespace GMAO.Infrastructure.Data.Migrations
                     b.Property<int?>("FournisseurId")
                         .HasColumnType("integer");
 
-                    b.Property<int>("LocalisationId")
+                    b.Property<int?>("LocalisationId")
                         .HasColumnType("integer");
 
                     b.Property<string>("Marque")
@@ -1811,8 +1811,7 @@ namespace GMAO.Infrastructure.Data.Migrations
                     b.HasOne("GMAO.Domain.Entities.Localisation", "Localisation")
                         .WithMany("Equipements")
                         .HasForeignKey("LocalisationId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("GMAO.Domain.Entities.Societe", "Societe")
                         .WithMany()

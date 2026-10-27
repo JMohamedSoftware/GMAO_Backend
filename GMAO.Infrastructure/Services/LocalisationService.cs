@@ -17,11 +17,14 @@ namespace GMAO.Infrastructure.Services
             _context = context;
         }
 
-        public async Task<IEnumerable<Localisation>> GetAllAsync()
+        public async Task<IEnumerable<Localisation>> GetAllAsync(int? societeId = null)
         {
-            return await _context.Localisations
-                .Include(l => l.SousLocalisations)
-                .ToListAsync();
+            var query = _context.Localisations.Include(l => l.SousLocalisations).AsQueryable();
+            if (societeId.HasValue && societeId.Value > 0)
+            {
+                query = query.Where(l => l.SocieteId == societeId.Value);
+            }
+            return await query.ToListAsync();
         }
 
         public async Task<Localisation?> GetByIdAsync(int id)
@@ -54,28 +57,43 @@ namespace GMAO.Infrastructure.Services
 
         public async Task<bool> DeleteAsync(int id)
         {
-            var localisation = await _context.Localisations
-                .Include(l => l.Equipements)
-                .Include(l => l.SousLocalisations)
-                .FirstOrDefaultAsync(l => l.Id == id);
-                
+            var localisation = await _context.Localisations.FirstOrDefaultAsync(l => l.Id == id);
             if (localisation == null) return false;
 
-            // Prevent deletion if there are equipments or sub-localisations attached
-            if (localisation.Equipements.Any() || localisation.SousLocalisations.Any())
-            {
-                return false;
-            }
-
-            _context.Localisations.Remove(localisation);
+            await DeleteSubTreeAsync(localisation.Id);
             await _context.SaveChangesAsync();
             return true;
         }
 
-        public async Task<IEnumerable<Localisation>> GetTreeAsync()
+        private async Task DeleteSubTreeAsync(int id)
         {
-            // Only fetch root nodes, and recursively include their children
-            var allNodes = await _context.Localisations.ToListAsync();
+            var children = await _context.Localisations.Where(l => l.ParentId == id).ToListAsync();
+            foreach (var child in children)
+            {
+                await DeleteSubTreeAsync(child.Id);
+            }
+
+            var equipments = await _context.Equipements.Where(e => e.LocalisationId == id).ToListAsync();
+            foreach (var eq in equipments)
+            {
+                eq.LocalisationId = null;
+            }
+
+            var loc = await _context.Localisations.FirstOrDefaultAsync(l => l.Id == id);
+            if (loc != null)
+            {
+                _context.Localisations.Remove(loc);
+            }
+        }
+
+        public async Task<IEnumerable<Localisation>> GetTreeAsync(int? societeId = null)
+        {
+            var query = _context.Localisations.AsQueryable();
+            if (societeId.HasValue && societeId.Value > 0)
+            {
+                query = query.Where(l => l.SocieteId == societeId.Value);
+            }
+            var allNodes = await query.ToListAsync();
             var roots = allNodes.Where(n => n.ParentId == null).ToList();
 
             foreach (var root in roots)
