@@ -51,8 +51,8 @@ public class OrdresTravailController : ControllerBase
 
     private async Task<int> ResolveSocieteIdAsync(OrdresTravail? ordre = null)
     {
-        if (ordre != null && ordre.SocieteId > 0)
-            return ordre.SocieteId;
+        if (ordre != null && ordre.SocieteId.HasValue && ordre.SocieteId.Value > 0)
+            return ordre.SocieteId.Value;
 
         if (ordre != null && ordre.EquipementId > 0)
         {
