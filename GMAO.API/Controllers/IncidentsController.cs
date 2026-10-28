@@ -1,9 +1,12 @@
+using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.EntityFrameworkCore;
 using GMAO.Domain.Entities;
 using GMAO.Domain.Interfaces;
 using GMAO.Domain.Enums;
+using GMAO.Infrastructure.Data;
 
 namespace GMAO.API.Controllers;
 
@@ -13,14 +16,22 @@ namespace GMAO.API.Controllers;
 public class IncidentsController : ControllerBase
 {
     private readonly IGenericRepository<DemandeIntervention> _repository;
+    private readonly GmaoDbContext _context;
 
-    public IncidentsController(IGenericRepository<DemandeIntervention> repository)
+    public IncidentsController(
+        IGenericRepository<DemandeIntervention> repository,
+        GmaoDbContext context)
     {
         _repository = repository;
+        _context = context;
     }
 
     private int GetSocieteId()
     {
+        var tenantHeader = Request.Headers["X-Tenant-Id"].FirstOrDefault();
+        if (int.TryParse(tenantHeader, out int tenantId) && tenantId > 0)
+            return tenantId;
+
         var societeIdClaim = User.FindFirst("SocieteId")?.Value;
         if (int.TryParse(societeIdClaim, out int societeId) && societeId > 0)
             return societeId;
@@ -30,14 +41,19 @@ public class IncidentsController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
-        var incidents = await _repository.GetAllAsync();
+        int societeId = GetSocieteId();
+        var incidents = await _context.DemandesIntervention
+            .Where(i => i.SocieteId == societeId)
+            .ToListAsync();
         return Ok(incidents);
     }
 
     [HttpGet("{id}")]
     public async Task<IActionResult> GetById(int id)
     {
-        var incident = await _repository.GetByIdAsync(id);
+        int societeId = GetSocieteId();
+        var incident = await _context.DemandesIntervention
+            .FirstOrDefaultAsync(i => i.Id == id && i.SocieteId == societeId);
         if (incident == null) return NotFound();
         return Ok(incident);
     }
@@ -45,8 +61,22 @@ public class IncidentsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] DemandeIntervention incident)
     {
-        incident.SocieteId = GetSocieteId();
+        int societeId = GetSocieteId();
+        incident.SocieteId = societeId;
         await _repository.AddAsync(incident);
+
+        // If priority is Haute or Critique, set equipment to EnPanne
+        if (incident.EquipementId > 0 && (int)incident.Priorite >= (int)PrioriteIntervention.Haute)
+        {
+            var eq = await _context.Equipements.FirstOrDefaultAsync(e => e.Id == incident.EquipementId && e.SocieteId == societeId);
+            if (eq != null)
+            {
+                eq.Etat = EtatEquipement.EnPanne;
+                eq.UpdatedAt = System.DateTime.UtcNow;
+                await _context.SaveChangesAsync();
+            }
+        }
+
         return CreatedAtAction(nameof(GetById), new { id = incident.Id }, incident);
     }
 

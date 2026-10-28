@@ -186,11 +186,27 @@ public class EquipementController : ControllerBase
         if (id != equipement.Id) return BadRequest();
         
         var societeId = GetSocieteId();
-        var existing = await _equipementRepository.GetByIdAsync(id);
-        if (existing == null || existing.SocieteId != societeId) return NotFound();
+        var existing = await _context.Equipements.FirstOrDefaultAsync(e => e.Id == id && e.SocieteId == societeId);
+        if (existing == null) return NotFound();
 
-        equipement.SocieteId = societeId;
-        await _equipementRepository.UpdateAsync(equipement);
+        existing.Code = equipement.Code ?? existing.Code;
+        existing.Designation = equipement.Designation ?? existing.Designation;
+        if (equipement.FamilleId > 0) existing.FamilleId = equipement.FamilleId;
+        existing.LocalisationId = equipement.LocalisationId ?? existing.LocalisationId;
+        existing.Marque = equipement.Marque ?? existing.Marque;
+        existing.Modele = equipement.Modele ?? existing.Modele;
+        existing.NumeroSerie = equipement.NumeroSerie ?? existing.NumeroSerie;
+        existing.DateAchat = equipement.DateAchat ?? existing.DateAchat;
+        existing.DateMiseEnService = equipement.DateMiseEnService ?? existing.DateMiseEnService;
+        existing.DateFinGarantie = equipement.DateFinGarantie ?? existing.DateFinGarantie;
+        if ((int)equipement.Criticite > 0) existing.Criticite = equipement.Criticite;
+        if ((int)equipement.Etat > 0) existing.Etat = equipement.Etat;
+        existing.FournisseurId = equipement.FournisseurId ?? existing.FournisseurId;
+        existing.PhotoUrl = equipement.PhotoUrl ?? existing.PhotoUrl;
+        existing.Notes = equipement.Notes ?? existing.Notes;
+        existing.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
         return NoContent();
     }
 
