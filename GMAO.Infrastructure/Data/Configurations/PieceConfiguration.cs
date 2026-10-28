@@ -30,7 +30,7 @@ public class PieceConfiguration : IEntityTypeConfiguration<Piece>
         entity.Property(p => p.StockMinimum).HasPrecision(18, 3);
         entity.Property(p => p.StockMaximum).HasPrecision(18, 3);
 
-        entity.HasIndex(p => p.Reference).IsUnique();
+        entity.HasIndex(p => new { p.SocieteId, p.Reference }).IsUnique();
 
         // ── Relations ──
         // FamillePiece → Pieces and Fournisseur → Pieces are already configured in their respective configs.

@@ -174,6 +174,12 @@ try
                 EXCEPTION WHEN OTHERS THEN NULL;
                 END;
 
+                BEGIN
+                    DROP INDEX IF EXISTS ""IX_Pieces_Reference"";
+                    CREATE UNIQUE INDEX IF NOT EXISTS ""IX_Pieces_SocieteId_Reference"" ON ""Pieces"" (""SocieteId"", ""Reference"");
+                EXCEPTION WHEN OTHERS THEN NULL;
+                END;
+
                 UPDATE ""Equipements"" SET ""Etat"" = 1 WHERE ""Etat"" = 0 OR ""Etat"" IS NULL;
                 UPDATE ""Equipements"" SET ""Criticite"" = 2 WHERE ""Criticite"" = 0 OR ""Criticite"" IS NULL;
             END $$;
