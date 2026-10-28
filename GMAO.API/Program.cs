@@ -123,6 +123,22 @@ app.UseSwaggerUI(c =>
 
 app.UseCors("GmaoPolicy");
 
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        context.Response.StatusCode = 500;
+        context.Response.ContentType = "application/json";
+        context.Response.Headers["Access-Control-Allow-Origin"] = "*";
+        context.Response.Headers["Access-Control-Allow-Headers"] = "*";
+        context.Response.Headers["Access-Control-Allow-Methods"] = "*";
+        var exceptionHandlerPathFeature = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerPathFeature>();
+        var ex = exceptionHandlerPathFeature?.Error;
+        var msg = ex?.InnerException?.Message ?? ex?.Message ?? "Erreur serveur";
+        await context.Response.WriteAsJsonAsync(new { error = msg });
+    });
+});
+
 var webRootPath = app.Environment.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
 var uploadsPath = Path.Combine(webRootPath, "uploads", "documents");
 if (!Directory.Exists(uploadsPath))
@@ -177,6 +193,18 @@ try
                 BEGIN
                     DROP INDEX IF EXISTS ""IX_Pieces_Reference"";
                     CREATE UNIQUE INDEX IF NOT EXISTS ""IX_Pieces_SocieteId_Reference"" ON ""Pieces"" (""SocieteId"", ""Reference"");
+                EXCEPTION WHEN OTHERS THEN NULL;
+                END;
+
+                BEGIN
+                    DROP INDEX IF EXISTS ""IX_OrdresTravail_NumeroOT"";
+                    CREATE UNIQUE INDEX IF NOT EXISTS ""IX_OrdresTravail_SocieteId_NumeroOT"" ON ""OrdresTravail"" (""SocieteId"", ""NumeroOT"");
+                EXCEPTION WHEN OTHERS THEN NULL;
+                END;
+
+                BEGIN
+                    DROP INDEX IF EXISTS ""IX_OrdresTravail_DemandeId"";
+                    CREATE INDEX IF NOT EXISTS ""IX_OrdresTravail_DemandeId"" ON ""OrdresTravail"" (""DemandeId"");
                 EXCEPTION WHEN OTHERS THEN NULL;
                 END;
 

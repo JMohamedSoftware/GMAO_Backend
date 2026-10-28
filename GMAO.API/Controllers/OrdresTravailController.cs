@@ -32,14 +32,47 @@ public class OrdresTravailController : ControllerBase
 
     private int GetSocieteId()
     {
-        var tenantHeader = Request.Headers["X-Tenant-Id"].FirstOrDefault();
-        if (int.TryParse(tenantHeader, out int tenantId) && tenantId > 0)
-            return tenantId;
+        var tenantHeader = Request.Headers["X-Tenant-Id"].FirstOrDefault()?.Trim();
+        if (!string.IsNullOrEmpty(tenantHeader) && tenantHeader != "null" && tenantHeader != "undefined")
+        {
+            if (int.TryParse(tenantHeader, out int tenantId) && tenantId > 0)
+                return tenantId;
+
+            var soc = _context.Societes.AsNoTracking().FirstOrDefault(s => s.CodeTenant == tenantHeader);
+            if (soc != null && soc.Id > 0)
+                return soc.Id;
+        }
 
         var societeIdClaim = User.FindFirst("SocieteId")?.Value;
         if (int.TryParse(societeIdClaim, out int societeId) && societeId > 0)
             return societeId;
         return 1;
+    }
+
+    private async Task<int> ResolveSocieteIdAsync(OrdresTravail? ordre = null)
+    {
+        if (ordre != null && ordre.SocieteId > 0)
+            return ordre.SocieteId;
+
+        if (ordre != null && ordre.EquipementId > 0)
+        {
+            var eqSocId = await _context.Equipements.AsNoTracking()
+                .Where(e => e.Id == ordre.EquipementId)
+                .Select(e => e.SocieteId)
+                .FirstOrDefaultAsync();
+            if (eqSocId > 0) return eqSocId;
+        }
+
+        if (ordre != null && ordre.DemandeId.HasValue && ordre.DemandeId.Value > 0)
+        {
+            var incSocId = await _context.DemandesIntervention.AsNoTracking()
+                .Where(d => d.Id == ordre.DemandeId.Value)
+                .Select(d => d.SocieteId)
+                .FirstOrDefaultAsync();
+            if (incSocId > 0) return incSocId;
+        }
+
+        return GetSocieteId();
     }
 
     private static DateTime? ToUtc(DateTime? d)
@@ -75,16 +108,28 @@ public class OrdresTravailController : ControllerBase
 
     /// <summary>
     /// Creates a new work order. Auto-generates a clean sequential NumeroOT
-    /// (e.g. OT-2026-001) scoped strictly to the authenticated company.
-    /// If demandeId is provided, also sets the corresponding incident status to TransformeeEnOT (4).
+    /// (e.g. OT-2026-S1-001) scoped to the company and globally collision-free.
+    /// If demandeId is provided, safely handles already existing OTs and
+    /// auto-transitions the incident to TransformeeEnOT.
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] OrdresTravail ordre)
     {
-        int societeId = GetSocieteId();
+        int societeId = await ResolveSocieteIdAsync(ordre);
         ordre.SocieteId = societeId;
 
-        // Auto-generate clean sequential NumeroOT per company and per year (OT-2026-001, OT-2026-002...)
+        // If DemandeId already has an OT in the database, return it instead of failing on unique constraint
+        if (ordre.DemandeId.HasValue && ordre.DemandeId.Value > 0)
+        {
+            var existingForDemande = await _context.OrdresTravail
+                .FirstOrDefaultAsync(o => o.DemandeId == ordre.DemandeId.Value);
+            if (existingForDemande != null)
+            {
+                return Ok(existingForDemande);
+            }
+        }
+
+        // Auto-generate clean sequential NumeroOT per company and per year
         int currentYear = DateTime.UtcNow.Year;
         string yearPrefix = $"OT-{currentYear}-";
 
@@ -94,17 +139,27 @@ public class OrdresTravailController : ControllerBase
         int maxSeq = 0;
         foreach (var o in existingOts)
         {
-            if (!string.IsNullOrEmpty(o.NumeroOT) && o.NumeroOT.StartsWith(yearPrefix))
+            if (!string.IsNullOrEmpty(o.NumeroOT))
             {
-                var numPart = o.NumeroOT.Substring(yearPrefix.Length);
-                if (int.TryParse(numPart, out int s) && s > maxSeq)
+                var parts = o.NumeroOT.Split('-');
+                if (parts.Length >= 3 && int.TryParse(parts[^1], out int s) && s > maxSeq)
                 {
                     maxSeq = s;
                 }
             }
         }
 
-        ordre.NumeroOT = $"{yearPrefix}{(maxSeq + 1):D3}";
+        // Generate a collision-free NumeroOT incorporating SocieteId so companies never collide
+        int seq = maxSeq + 1;
+        string candidate;
+        do
+        {
+            candidate = $"{yearPrefix}S{societeId}-{seq:D3}";
+            seq++;
+        } while (await _context.OrdresTravail.AnyAsync(o => o.NumeroOT == candidate));
+
+        ordre.NumeroOT = candidate;
+        ordre.DateCreation = DateTime.UtcNow;
 
         await _repository.AddAsync(ordre);
 
@@ -122,7 +177,7 @@ public class OrdresTravailController : ControllerBase
         // Auto-update equipment status: if Corrective or high/urgent priority, mark as EnPanne
         if (ordre.EquipementId > 0 && (ordre.TypeMaintenance == TypeMaintenance.Corrective || (int)ordre.Priorite >= (int)PrioriteIntervention.Haute))
         {
-            var equipement = await _context.Equipements.FirstOrDefaultAsync(e => e.Id == ordre.EquipementId && e.SocieteId == societeId);
+            var equipement = await _context.Equipements.FirstOrDefaultAsync(e => e.Id == ordre.EquipementId);
             if (equipement != null)
             {
                 equipement.Etat = EtatEquipement.EnPanne;
