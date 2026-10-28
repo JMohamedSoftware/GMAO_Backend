@@ -208,6 +208,25 @@ try
                 EXCEPTION WHEN OTHERS THEN NULL;
                 END;
 
+                -- Renumber all existing OTs per company sequentially (OT-YYYY-0001, OT-YYYY-0002, ...)
+                BEGIN
+                    UPDATE ""OrdresTravail"" SET ""NumeroOT"" = 'TMP-' || ""Id""::text;
+
+                    WITH numbered AS (
+                        SELECT ""Id"",
+                               'OT-' || COALESCE(TO_CHAR(""DateCreation"", 'YYYY'), '2026') || '-' || LPAD(ROW_NUMBER() OVER (
+                                   PARTITION BY ""SocieteId"", COALESCE(TO_CHAR(""DateCreation"", 'YYYY'), '2026')
+                                   ORDER BY ""DateCreation"" ASC, ""Id"" ASC
+                               )::text, 4, '0') AS new_num
+                        FROM ""OrdresTravail""
+                    )
+                    UPDATE ""OrdresTravail"" ot
+                    SET ""NumeroOT"" = numbered.new_num
+                    FROM numbered
+                    WHERE ot.""Id"" = numbered.""Id"";
+                EXCEPTION WHEN OTHERS THEN NULL;
+                END;
+
                 UPDATE ""Equipements"" SET ""Etat"" = 1 WHERE ""Etat"" = 0 OR ""Etat"" IS NULL;
                 UPDATE ""Equipements"" SET ""Criticite"" = 2 WHERE ""Criticite"" = 0 OR ""Criticite"" IS NULL;
                 UPDATE ""Pieces"" SET ""SocieteId"" = 1 WHERE ""SocieteId"" = 0 OR ""SocieteId"" IS NULL;

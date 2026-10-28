@@ -129,12 +129,12 @@ public class OrdresTravailController : ControllerBase
             }
         }
 
-        // Auto-generate clean sequential NumeroOT per company and per year
+        // Auto-generate clean sequential NumeroOT per company and per year (OT-YYYY-0001, OT-YYYY-0002, ...)
         int currentYear = DateTime.UtcNow.Year;
         string yearPrefix = $"OT-{currentYear}-";
 
         var existingOts = await _context.OrdresTravail
-            .Where(o => o.SocieteId == societeId)
+            .Where(o => o.SocieteId == societeId && o.NumeroOT.StartsWith(yearPrefix))
             .ToListAsync();
         int maxSeq = 0;
         foreach (var o in existingOts)
@@ -149,14 +149,14 @@ public class OrdresTravailController : ControllerBase
             }
         }
 
-        // Generate a collision-free NumeroOT incorporating SocieteId so companies never collide
+        // Generate a collision-free NumeroOT for this company (e.g. OT-2026-0001)
         int seq = maxSeq + 1;
         string candidate;
         do
         {
-            candidate = $"{yearPrefix}S{societeId}-{seq:D3}";
+            candidate = $"{yearPrefix}{seq:D4}";
             seq++;
-        } while (await _context.OrdresTravail.AnyAsync(o => o.NumeroOT == candidate));
+        } while (await _context.OrdresTravail.AnyAsync(o => o.SocieteId == societeId && o.NumeroOT == candidate));
 
         ordre.NumeroOT = candidate;
         ordre.DateCreation = DateTime.UtcNow;

@@ -204,10 +204,39 @@ public class PlansPreventifController : ControllerBase
             ? "Intervention saisonnière"
             : $"Fréquence: tous les {plan.Frequence} {plan.UniteMesure}";
 
+        // Déterminer la société
+        int targetSocieteId = int.TryParse(User.FindFirst("SocieteId")?.Value, out int sId) && sId > 0 ? sId : (plan.Equipement?.SocieteId ?? 1);
+        int currentYear = now.Year;
+        string yearPrefix = $"OT-{currentYear}-";
+
+        var existingOts = await _context.OrdresTravail
+            .Where(o => o.SocieteId == targetSocieteId && o.NumeroOT.StartsWith(yearPrefix))
+            .ToListAsync();
+        int maxSeq = 0;
+        foreach (var o in existingOts)
+        {
+            if (!string.IsNullOrEmpty(o.NumeroOT))
+            {
+                var parts = o.NumeroOT.Split('-');
+                if (parts.Length >= 3 && int.TryParse(parts[^1], out int s) && s > maxSeq)
+                {
+                    maxSeq = s;
+                }
+            }
+        }
+
+        int seq = maxSeq + 1;
+        string candidate;
+        do
+        {
+            candidate = $"{yearPrefix}{seq:D4}";
+            seq++;
+        } while (await _context.OrdresTravail.AnyAsync(o => o.SocieteId == targetSocieteId && o.NumeroOT == candidate));
+
         var ot = new OrdresTravail
         {
-            NumeroOT        = $"OT-PRV-{now.Year}-{plan.Id}-{now.Ticks % 10000}",
-            SocieteId       = int.TryParse(User.FindFirst("SocieteId")?.Value, out int sId) && sId > 0 ? sId : (plan.Equipement?.SocieteId ?? 1),
+            NumeroOT        = candidate,
+            SocieteId       = targetSocieteId,
             EquipementId    = plan.EquipementId,
             ResponsableId   = responsableId,
             TypeMaintenance = TypeMaintenance.Preventive,
