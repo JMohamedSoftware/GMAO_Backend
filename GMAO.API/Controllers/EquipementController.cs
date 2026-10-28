@@ -33,10 +33,17 @@ public class EquipementController : ControllerBase
 
     private int GetSocieteId()
     {
+        var tenantHeader = Request.Headers["X-Tenant-Id"].FirstOrDefault();
+        if (int.TryParse(tenantHeader, out int tenantId) && tenantId > 0)
+        {
+            return tenantId;
+        }
+
         var societeIdClaim = User.FindFirst("SocieteId")?.Value;
-        if (int.TryParse(societeIdClaim, out int societeId))
+        if (int.TryParse(societeIdClaim, out int societeId) && societeId > 0)
             return societeId;
-        return 0; // Or throw exception
+
+        return 1;
     }
 
     private static string FormatFileSize(long bytes)
@@ -70,8 +77,8 @@ public class EquipementController : ControllerBase
             DateAchat = e.DateAchat,
             DateMiseEnService = e.DateMiseEnService,
             DateFinGarantie = e.DateFinGarantie,
-            Criticite = e.Criticite.ToString(),
-            Etat = e.Etat.ToString(),
+            Criticite = (int)e.Criticite == 0 ? "Moyenne" : e.Criticite.ToString(),
+            Etat = (int)e.Etat == 0 ? "EnService" : e.Etat.ToString(),
             FournisseurId = e.FournisseurId,
             FournisseurNom = e.Fournisseur?.Nom,
             PhotoUrl = e.PhotoUrl,
@@ -118,8 +125,8 @@ public class EquipementController : ControllerBase
             DateAchat = e.DateAchat,
             DateMiseEnService = e.DateMiseEnService,
             DateFinGarantie = e.DateFinGarantie,
-            Criticite = e.Criticite.ToString(),
-            Etat = e.Etat.ToString(),
+            Criticite = (int)e.Criticite == 0 ? "Moyenne" : e.Criticite.ToString(),
+            Etat = (int)e.Etat == 0 ? "EnService" : e.Etat.ToString(),
             FournisseurId = e.FournisseurId,
             FournisseurNom = e.Fournisseur?.Nom,
             PhotoUrl = e.PhotoUrl,
@@ -148,6 +155,26 @@ public class EquipementController : ControllerBase
     {
         var societeId = GetSocieteId();
         equipement.SocieteId = societeId;
+
+        if (string.IsNullOrWhiteSpace(equipement.Code))
+        {
+            equipement.Code = $"EQ-{DateTime.UtcNow.Ticks % 100000:D5}";
+        }
+
+        if (equipement.FamilleId <= 0)
+        {
+            equipement.FamilleId = 1;
+        }
+
+        if ((int)equipement.Etat <= 0)
+        {
+            equipement.Etat = GMAO.Domain.Enums.EtatEquipement.EnService;
+        }
+
+        if ((int)equipement.Criticite <= 0)
+        {
+            equipement.Criticite = GMAO.Domain.Enums.CriticiteEquipement.Moyenne;
+        }
         
         await _equipementRepository.AddAsync(equipement);
         return CreatedAtAction(nameof(GetById), new { id = equipement.Id }, equipement);

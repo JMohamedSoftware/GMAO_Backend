@@ -173,6 +173,9 @@ try
                     CREATE UNIQUE INDEX IF NOT EXISTS ""IX_Fournisseurs_SocieteId_Code"" ON ""Fournisseurs"" (""SocieteId"", ""Code"");
                 EXCEPTION WHEN OTHERS THEN NULL;
                 END;
+
+                UPDATE ""Equipements"" SET ""Etat"" = 1 WHERE ""Etat"" = 0 OR ""Etat"" IS NULL;
+                UPDATE ""Equipements"" SET ""Criticite"" = 2 WHERE ""Criticite"" = 0 OR ""Criticite"" IS NULL;
             END $$;
         ");
     }
