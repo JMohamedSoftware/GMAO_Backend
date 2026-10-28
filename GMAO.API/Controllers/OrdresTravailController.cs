@@ -42,6 +42,17 @@ public class OrdresTravailController : ControllerBase
         return 1;
     }
 
+    private static DateTime? ToUtc(DateTime? d)
+    {
+        if (d == null) return null;
+        return d.Value.Kind switch
+        {
+            DateTimeKind.Utc   => d,
+            DateTimeKind.Local => d.Value.ToUniversalTime(),
+            _                  => DateTime.SpecifyKind(d.Value, DateTimeKind.Utc)
+        };
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
@@ -140,25 +151,44 @@ public class OrdresTravailController : ControllerBase
             .FirstOrDefaultAsync(o => o.Id == id && o.SocieteId == societeId);
         if (existing == null) return NotFound();
 
-        // Patch only scalar/value properties
-        existing.NumeroOT          = ordre.NumeroOT;
-        existing.DemandeId         = ordre.DemandeId;
-        existing.EquipementId      = ordre.EquipementId;
-        existing.ResponsableId     = ordre.ResponsableId;
-        existing.TechnicienId      = ordre.TechnicienId;
+        // Patch only scalar/value properties.
+        // NumeroOT is an immutable identifier (unique index, max 30 chars) — never
+        // overwrite it with free text (the frontend used to send the title here,
+        // which broke the unique index for preventive OTs sharing the same description).
+        if (string.IsNullOrWhiteSpace(existing.NumeroOT) &&
+            !string.IsNullOrWhiteSpace(ordre.NumeroOT) && ordre.NumeroOT.Length <= 30)
+        {
+            existing.NumeroOT = ordre.NumeroOT;
+        }
+        existing.DemandeId         = ordre.DemandeId ?? existing.DemandeId;
+        if (ordre.EquipementId > 0)  existing.EquipementId  = ordre.EquipementId;
+        if (ordre.ResponsableId > 0) existing.ResponsableId = ordre.ResponsableId;
+        existing.TechnicienId      = ordre.TechnicienId ?? existing.TechnicienId;
         existing.Priorite          = ordre.Priorite;
         existing.TypeMaintenance   = ordre.TypeMaintenance;
         existing.Statut            = ordre.Statut;
-        existing.DateDebutPrevue   = ordre.DateDebutPrevue;
-        existing.DateFinPrevue     = ordre.DateFinPrevue;
-        existing.DateDebutReelle   = ordre.DateDebutReelle;
-        existing.DateFinReelle     = ordre.DateFinReelle;
-        existing.Description       = ordre.Description;
-        existing.Instructions      = ordre.Instructions;
-        existing.CoutMainOeuvre    = ordre.CoutMainOeuvre;
-        existing.CoutPieces        = ordre.CoutPieces;
-        existing.CoutSousTraitance = ordre.CoutSousTraitance;
-        existing.CampagneId        = ordre.CampagneId;
+        existing.DateDebutPrevue   = ordre.DateDebutPrevue ?? existing.DateDebutPrevue;
+        existing.DateFinPrevue     = ordre.DateFinPrevue ?? existing.DateFinPrevue;
+        existing.DateDebutReelle   = ordre.DateDebutReelle ?? existing.DateDebutReelle;
+        existing.DateFinReelle     = ordre.DateFinReelle ?? existing.DateFinReelle;
+        if (!string.IsNullOrWhiteSpace(ordre.Description))  existing.Description  = ordre.Description;
+        if (!string.IsNullOrWhiteSpace(ordre.Instructions)) existing.Instructions = ordre.Instructions;
+        existing.CoutMainOeuvre    = ordre.CoutMainOeuvre ?? existing.CoutMainOeuvre;
+        existing.CoutPieces        = ordre.CoutPieces ?? existing.CoutPieces;
+        existing.CoutSousTraitance = ordre.CoutSousTraitance ?? existing.CoutSousTraitance;
+        existing.CampagneId        = ordre.CampagneId ?? existing.CampagneId;
+
+        // Real start / end dates follow the lifecycle
+        if (existing.Statut == StatutOT.EnCours && existing.DateDebutReelle == null)
+            existing.DateDebutReelle = DateTime.UtcNow;
+        if ((existing.Statut == StatutOT.Termine || (int)existing.Statut == 6) && existing.DateFinReelle == null)
+            existing.DateFinReelle = DateTime.UtcNow;
+
+        // Npgsql (timestamptz) refuses non-UTC DateTime values
+        existing.DateDebutPrevue = ToUtc(existing.DateDebutPrevue);
+        existing.DateFinPrevue   = ToUtc(existing.DateFinPrevue);
+        existing.DateDebutReelle = ToUtc(existing.DateDebutReelle);
+        existing.DateFinReelle   = ToUtc(existing.DateFinReelle);
 
         await _context.SaveChangesAsync();
 
