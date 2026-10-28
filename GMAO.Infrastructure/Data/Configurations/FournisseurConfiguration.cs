@@ -31,7 +31,7 @@ public class FournisseurConfiguration : IEntityTypeConfiguration<Fournisseur>
         entity.Property(f => f.Contact)
               .HasMaxLength(150);
 
-        entity.HasIndex(f => f.Code).IsUnique();
+        entity.HasIndex(f => new { f.SocieteId, f.Code }).IsUnique();
 
         // ── Fournisseur → Equipements (One-to-Many) ──────────────────────────
         entity.HasMany(f => f.Equipements)

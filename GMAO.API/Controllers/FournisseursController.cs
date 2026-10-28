@@ -1,8 +1,11 @@
+using System;
+using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.EntityFrameworkCore;
 using GMAO.Domain.Entities;
-using GMAO.Domain.Interfaces;
+using GMAO.Infrastructure.Data;
 
 namespace GMAO.API.Controllers;
 
@@ -11,32 +14,50 @@ namespace GMAO.API.Controllers;
 [Authorize]
 public class FournisseursController : ControllerBase
 {
-    private readonly IGenericRepository<Fournisseur> _repository;
+    private readonly GmaoDbContext _context;
 
-    public FournisseursController(IGenericRepository<Fournisseur> repository)
+    public FournisseursController(GmaoDbContext context)
     {
-        _repository = repository;
+        _context = context;
     }
 
     private int GetSocieteId()
     {
+        var tenantHeader = Request.Headers["X-Tenant-Id"].FirstOrDefault();
+        if (int.TryParse(tenantHeader, out int tenantId) && tenantId > 0)
+        {
+            return tenantId;
+        }
+
         var societeIdClaim = User.FindFirst("SocieteId")?.Value;
         if (int.TryParse(societeIdClaim, out int societeId) && societeId > 0)
             return societeId;
+
         return 1;
     }
 
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
-        var fournisseurs = await _repository.GetAllAsync();
+        var societeId = GetSocieteId();
+        var isSuperAdmin = User.IsInRole("SuperAdmin");
+        var hasTenantHeader = Request.Headers.ContainsKey("X-Tenant-Id");
+
+        IQueryable<Fournisseur> query = _context.Fournisseurs.AsNoTracking();
+
+        if (hasTenantHeader || !isSuperAdmin)
+        {
+            query = query.Where(f => f.SocieteId == societeId);
+        }
+
+        var fournisseurs = await query.OrderBy(f => f.Nom).ToListAsync();
         return Ok(fournisseurs);
     }
 
     [HttpGet("{id}")]
     public async Task<IActionResult> GetById(int id)
     {
-        var fournisseur = await _repository.GetByIdAsync(id);
+        var fournisseur = await _context.Fournisseurs.FindAsync(id);
         if (fournisseur == null) return NotFound();
         return Ok(fournisseur);
     }
@@ -48,12 +69,25 @@ public class FournisseursController : ControllerBase
             return BadRequest(new { message = "Le nom du fournisseur est obligatoire." });
 
         fournisseur.SocieteId = GetSocieteId();
-        if (string.IsNullOrWhiteSpace(fournisseur.Code))
+
+        // Ensure unique code per societe (and overall to avoid constraint issues)
+        if (string.IsNullOrWhiteSpace(fournisseur.Code) ||
+            await _context.Fournisseurs.AnyAsync(f => f.Code == fournisseur.Code))
         {
-            fournisseur.Code = $"FRN-{DateTime.UtcNow.Ticks % 10000:D4}";
+            int count = await _context.Fournisseurs.CountAsync(f => f.SocieteId == fournisseur.SocieteId);
+            string candidate = $"SUP-{fournisseur.SocieteId}-{count + 1:D3}";
+            while (await _context.Fournisseurs.AnyAsync(f => f.Code == candidate))
+            {
+                count++;
+                candidate = $"SUP-{fournisseur.SocieteId}-{count + 1:D3}";
+            }
+            fournisseur.Code = candidate;
         }
 
-        await _repository.AddAsync(fournisseur);
+        fournisseur.CreatedAt = DateTime.UtcNow;
+        _context.Fournisseurs.Add(fournisseur);
+        await _context.SaveChangesAsync();
+
         return CreatedAtAction(nameof(GetById), new { id = fournisseur.Id }, fournisseur);
     }
 
@@ -62,7 +96,7 @@ public class FournisseursController : ControllerBase
     {
         if (id != fournisseur.Id) return BadRequest();
         
-        var existing = await _repository.GetByIdAsync(id);
+        var existing = await _context.Fournisseurs.FirstOrDefaultAsync(f => f.Id == id);
         if (existing == null) return NotFound();
 
         existing.Nom = fournisseur.Nom;
@@ -72,17 +106,32 @@ public class FournisseursController : ControllerBase
         existing.Adresse = fournisseur.Adresse;
         existing.IsActive = fournisseur.IsActive;
 
-        await _repository.UpdateAsync(existing);
+        await _context.SaveChangesAsync();
         return Ok(existing);
     }
 
     [HttpDelete("{id}")]
     public async Task<IActionResult> Delete(int id)
     {
-        var fournisseur = await _repository.GetByIdAsync(id);
+        var fournisseur = await _context.Fournisseurs
+            .Include(f => f.Equipements)
+            .Include(f => f.Pieces)
+            .FirstOrDefaultAsync(f => f.Id == id);
+
         if (fournisseur == null) return NotFound();
-        
-        await _repository.DeleteAsync(fournisseur);
+
+        foreach (var eq in fournisseur.Equipements)
+        {
+            eq.FournisseurId = null;
+        }
+        foreach (var p in fournisseur.Pieces)
+        {
+            p.FournisseurId = null;
+        }
+
+        _context.Fournisseurs.Remove(fournisseur);
+        await _context.SaveChangesAsync();
         return NoContent();
     }
 }
+

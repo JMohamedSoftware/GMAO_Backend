@@ -167,6 +167,12 @@ try
                     EXCEPTION WHEN OTHERS THEN NULL;
                     END;
                 END IF;
+
+                BEGIN
+                    DROP INDEX IF EXISTS ""IX_Fournisseurs_Code"";
+                    CREATE UNIQUE INDEX IF NOT EXISTS ""IX_Fournisseurs_SocieteId_Code"" ON ""Fournisseurs"" (""SocieteId"", ""Code"");
+                EXCEPTION WHEN OTHERS THEN NULL;
+                END;
             END $$;
         ");
     }
