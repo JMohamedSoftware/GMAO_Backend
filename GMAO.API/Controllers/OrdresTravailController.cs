@@ -149,12 +149,12 @@ public class OrdresTravailController : ControllerBase
             }
         }
 
-        // Generate a collision-free NumeroOT for this company (e.g. OT-2026-0001)
+        // Generate a collision-free NumeroOT for this company (e.g. OT-2026-1, OT-2026-2)
         int seq = maxSeq + 1;
         string candidate;
         do
         {
-            candidate = $"{yearPrefix}{seq:D4}";
+            candidate = $"{yearPrefix}{seq}";
             seq++;
         } while (await _context.OrdresTravail.AnyAsync(o => o.SocieteId == societeId && o.NumeroOT == candidate));
 

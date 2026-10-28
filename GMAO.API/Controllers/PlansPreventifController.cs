@@ -229,7 +229,7 @@ public class PlansPreventifController : ControllerBase
         string candidate;
         do
         {
-            candidate = $"{yearPrefix}{seq:D4}";
+            candidate = $"{yearPrefix}{seq}";
             seq++;
         } while (await _context.OrdresTravail.AnyAsync(o => o.SocieteId == targetSocieteId && o.NumeroOT == candidate));
 

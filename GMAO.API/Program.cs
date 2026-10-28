@@ -208,16 +208,16 @@ try
                 EXCEPTION WHEN OTHERS THEN NULL;
                 END;
 
-                -- Renumber all existing OTs per company sequentially (OT-YYYY-0001, OT-YYYY-0002, ...)
+                -- Renumber all existing OTs per company sequentially (OT-YYYY-1, OT-YYYY-2, ...)
                 BEGIN
                     UPDATE ""OrdresTravail"" SET ""NumeroOT"" = 'TMP-' || ""Id""::text;
 
                     WITH numbered AS (
                         SELECT ""Id"",
-                               'OT-' || COALESCE(TO_CHAR(""DateCreation"", 'YYYY'), '2026') || '-' || LPAD(ROW_NUMBER() OVER (
+                               'OT-' || COALESCE(TO_CHAR(""DateCreation"", 'YYYY'), '2026') || '-' || (ROW_NUMBER() OVER (
                                    PARTITION BY ""SocieteId"", COALESCE(TO_CHAR(""DateCreation"", 'YYYY'), '2026')
                                    ORDER BY ""DateCreation"" ASC, ""Id"" ASC
-                               )::text, 4, '0') AS new_num
+                               ))::text AS new_num
                         FROM ""OrdresTravail""
                     )
                     UPDATE ""OrdresTravail"" ot
