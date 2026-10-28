@@ -268,6 +268,17 @@ public class OrdresTravailController : ControllerBase
             }
         }
 
+        // Auto-close linked incident when OT is completed or closed
+        if ((existing.Statut == StatutOT.Termine || (int)existing.Statut == 6) && existing.DemandeId.HasValue && existing.DemandeId.Value > 0)
+        {
+            var incident = await _context.DemandesIntervention.FirstOrDefaultAsync(d => d.Id == existing.DemandeId.Value);
+            if (incident != null)
+            {
+                incident.Statut = StatutDemande.Cloturee;
+                await _context.SaveChangesAsync();
+            }
+        }
+
         return NoContent();
     }
 

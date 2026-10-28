@@ -40,7 +40,8 @@ public enum StatutDemande
     EnAttente = 1,
     Validee = 2,
     Rejetee = 3,
-    TransformeeEnOT = 4
+    TransformeeEnOT = 4,
+    Cloturee = 5
 }
 
 public enum TypeMaintenance

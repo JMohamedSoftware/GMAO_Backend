@@ -227,6 +227,16 @@ try
                 EXCEPTION WHEN OTHERS THEN NULL;
                 END;
 
+                -- Sync incidents to Cloturee (5) if their linked OT is already Termine (5) or Cloture (6)
+                BEGIN
+                    UPDATE ""DemandesIntervention"" di
+                    SET ""Statut"" = 5
+                    FROM ""OrdresTravail"" ot
+                    WHERE ot.""DemandeId"" = di.""Id""
+                      AND (ot.""Statut"" = 5 OR ot.""Statut"" = 6);
+                EXCEPTION WHEN OTHERS THEN NULL;
+                END;
+
                 UPDATE ""Equipements"" SET ""Etat"" = 1 WHERE ""Etat"" = 0 OR ""Etat"" IS NULL;
                 UPDATE ""Equipements"" SET ""Criticite"" = 2 WHERE ""Criticite"" = 0 OR ""Criticite"" IS NULL;
                 UPDATE ""Pieces"" SET ""SocieteId"" = 1 WHERE ""SocieteId"" = 0 OR ""SocieteId"" IS NULL;
