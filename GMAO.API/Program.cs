@@ -182,6 +182,7 @@ try
 
                 UPDATE ""Equipements"" SET ""Etat"" = 1 WHERE ""Etat"" = 0 OR ""Etat"" IS NULL;
                 UPDATE ""Equipements"" SET ""Criticite"" = 2 WHERE ""Criticite"" = 0 OR ""Criticite"" IS NULL;
+                UPDATE ""Pieces"" SET ""SocieteId"" = 1 WHERE ""SocieteId"" = 0 OR ""SocieteId"" IS NULL;
             END $$;
         ");
     }

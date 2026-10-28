@@ -42,7 +42,7 @@ public class PiecesController : ControllerBase
     {
         int societeId = GetSocieteId();
         var pieces = await _context.Pieces
-            .Where(p => p.SocieteId == societeId)
+            .Where(p => p.SocieteId == societeId || (societeId == 1 && (p.SocieteId == null || p.SocieteId == 0)))
             .OrderBy(p => p.Reference)
             .ToListAsync();
         return Ok(pieces);
@@ -53,7 +53,7 @@ public class PiecesController : ControllerBase
     {
         int societeId = GetSocieteId();
         var piece = await _context.Pieces
-            .FirstOrDefaultAsync(p => p.Id == id && p.SocieteId == societeId);
+            .FirstOrDefaultAsync(p => p.Id == id && (p.SocieteId == societeId || (societeId == 1 && (p.SocieteId == null || p.SocieteId == 0))));
         if (piece == null) return NotFound();
         return Ok(piece);
     }
