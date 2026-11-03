@@ -181,6 +181,7 @@ public class PlansPreventifController : ControllerBase
     {
         var plan = await _context.PlansPreventifs
             .Include(p => p.Equipement)
+            .Include(p => p.Taches)
             .FirstOrDefaultAsync(p => p.Id == id);
 
         if (plan == null) return NotFound();
@@ -192,6 +193,7 @@ public class PlansPreventifController : ControllerBase
             "jours"  => now.AddDays(plan.Frequence),
             "semaines" => now.AddDays(plan.Frequence * 7),
             "mois"   => now.AddMonths(plan.Frequence),
+            "heures" => now.AddDays(Math.Max(1, (int)Math.Ceiling(plan.Frequence / 24.0))),
             _        => now.AddDays(plan.Frequence)
         };
 
@@ -246,7 +248,9 @@ public class PlansPreventifController : ControllerBase
             DateDebutPrevue = now, // Demandé par le user : activé le jour même de la génération manuelle
             DateFinPrevue   = now.AddDays(7), // Donner un délai logique par défaut (7 jours)
             Description     = $"OT Préventif généré depuis le plan: {plan.Titre}. {descType}.",
-            Instructions    = $"Plan préventif {plan.Id} — Équipement: {plan.Equipement?.Designation}"
+            Instructions    = plan.Taches != null && plan.Taches.Any()
+                ? $"Plan préventif {plan.Id}\n\nTâches à réaliser:\n" + string.Join("\n", plan.Taches.OrderBy(t => t.Ordre).Select(t => $"• {t.Description}" + (t.DureeEstimeeMinutes.HasValue ? $" ({t.DureeEstimeeMinutes} min)" : "")))
+                : $"Plan préventif {plan.Id} — Équipement: {plan.Equipement?.Designation}"
         };
 
         await _otRepository.AddAsync(ot);
