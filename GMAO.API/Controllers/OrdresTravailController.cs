@@ -91,6 +91,7 @@ public class OrdresTravailController : ControllerBase
     {
         int societeId = GetSocieteId();
         var ordres = await _context.OrdresTravail
+            .Include(o => o.Campagne)
             .Where(o => o.SocieteId == societeId)
             .ToListAsync();
         return Ok(ordres);
@@ -160,6 +161,27 @@ public class OrdresTravailController : ControllerBase
 
         ordre.NumeroOT = candidate;
         ordre.DateCreation = DateTime.UtcNow;
+
+        // Auto-assigner la CampagneId active de l'entreprise si non spécifiée
+        if (!ordre.CampagneId.HasValue || ordre.CampagneId.Value <= 0)
+        {
+            var activeCampagneId = await _context.Campagnes
+                .Where(c => c.SocieteId == societeId && c.Etat == EtatCampagne.EnCours)
+                .OrderByDescending(c => c.DateDebut)
+                .Select(c => (int?)c.Id)
+                .FirstOrDefaultAsync();
+
+            if (!activeCampagneId.HasValue)
+            {
+                activeCampagneId = await _context.Campagnes
+                    .Where(c => c.SocieteId == societeId)
+                    .OrderByDescending(c => c.DateDebut)
+                    .Select(c => (int?)c.Id)
+                    .FirstOrDefaultAsync();
+            }
+
+            ordre.CampagneId = activeCampagneId;
+        }
 
         await _repository.AddAsync(ordre);
 
