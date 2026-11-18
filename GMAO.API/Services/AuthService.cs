@@ -161,12 +161,10 @@ public class AuthService : IAuthService
             new Claim("SocieteId", user.SocieteId?.ToString() ?? "")
         };
 
-        if (user.Role?.RolePermissions != null)
+        var effectivePermissions = GetEffectivePermissions(user);
+        foreach (var perm in effectivePermissions)
         {
-            foreach (var perm in user.Role.RolePermissions)
-            {
-                claims.Add(new Claim("Permission", perm.PermissionName));
-            }
+            claims.Add(new Claim("Permission", perm));
         }
 
         var token = new JwtSecurityToken(
@@ -178,6 +176,29 @@ public class AuthService : IAuthService
         );
 
         return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    private List<string> GetEffectivePermissions(User user)
+    {
+        if (user.Role?.RolePermissions == null) return new List<string>();
+
+        // 1. Permissions personnalisées pour l'entreprise
+        if (user.SocieteId.HasValue && user.SocieteId.Value > 0)
+        {
+            var tenantPerms = user.Role.RolePermissions
+                .Where(rp => rp.SocieteId == user.SocieteId.Value)
+                .Select(rp => rp.PermissionName)
+                .ToList();
+
+            if (tenantPerms.Any())
+                return tenantPerms;
+        }
+
+        // 2. Repli vers les permissions par défaut système (SocieteId == null)
+        return user.Role.RolePermissions
+            .Where(rp => rp.SocieteId == null)
+            .Select(rp => rp.PermissionName)
+            .ToList();
     }
 
     private string GenerateRefreshToken()
@@ -205,7 +226,7 @@ public class AuthService : IAuthService
             TenantName = user.Societe?.Nom ?? "Plateforme GMAO",
             IsActive = user.IsActive,
             CreatedAt = user.CreatedAt.ToString("o"),
-            Permissions = user.Role?.RolePermissions.Select(rp => rp.PermissionName).ToList() ?? new List<string>()
+            Permissions = GetEffectivePermissions(user)
         };
     }
 }

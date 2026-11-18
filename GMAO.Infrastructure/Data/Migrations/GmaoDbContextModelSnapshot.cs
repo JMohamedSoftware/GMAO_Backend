@@ -608,7 +608,7 @@ namespace GMAO.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Code")
+                    b.HasIndex("SocieteId", "Code")
                         .IsUnique();
 
                     b.ToTable("Fournisseurs", (string)null);
@@ -1018,7 +1018,7 @@ namespace GMAO.Infrastructure.Data.Migrations
                     b.Property<int>("ResponsableId")
                         .HasColumnType("integer");
 
-                    b.Property<int>("SocieteId")
+                    b.Property<int?>("SocieteId")
                         .HasColumnType("integer");
 
                     b.Property<int>("Statut")
@@ -1084,7 +1084,7 @@ namespace GMAO.Infrastructure.Data.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
 
-                    b.Property<int>("SocieteId")
+                    b.Property<int?>("SocieteId")
                         .HasColumnType("integer");
 
                     b.Property<decimal>("StockActuel")
@@ -1112,7 +1112,7 @@ namespace GMAO.Infrastructure.Data.Migrations
 
                     b.HasIndex("FournisseurId");
 
-                    b.HasIndex("Reference")
+                    b.HasIndex("SocieteId", "Reference")
                         .IsUnique();
 
                     b.ToTable("Pieces", (string)null);
@@ -1423,9 +1423,14 @@ namespace GMAO.Infrastructure.Data.Migrations
                     b.Property<int>("RoleId")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("SocieteId")
+                        .HasColumnType("integer");
+
                     b.HasKey("Id");
 
                     b.HasIndex("RoleId");
+
+                    b.HasIndex("SocieteId");
 
                     b.ToTable("RolePermissions");
                 });
@@ -2003,7 +2008,13 @@ namespace GMAO.Infrastructure.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("GMAO.Domain.Entities.Societe", "Societe")
+                        .WithMany()
+                        .HasForeignKey("SocieteId");
+
                     b.Navigation("Role");
+
+                    b.Navigation("Societe");
                 });
 
             modelBuilder.Entity("GMAO.Domain.Entities.SiteUsine", b =>
