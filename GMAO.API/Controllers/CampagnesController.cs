@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using GMAO.Domain.Entities;
+using GMAO.Domain.Enums;
 using GMAO.Infrastructure.Data;
 
 namespace GMAO.API.Controllers;
@@ -72,20 +73,35 @@ public class CampagnesController : ControllerBase
     [HttpPut("{id}")]
     public async Task<IActionResult> Update(int id, [FromBody] Campagne campagne)
     {
-        if (id != campagne.Id) return BadRequest();
         var societeId = GetSocieteId();
-        
         var existing = await _context.Campagnes.FirstOrDefaultAsync(c => c.Id == id && c.SocieteId == societeId);
         if (existing == null) return NotFound();
 
-        existing.Nom = campagne.Nom;
-        existing.Description = campagne.Description;
-        existing.DateDebut = campagne.DateDebut;
-        existing.DateFin = campagne.DateFin;
-        existing.Etat = campagne.Etat;
+        if (!string.IsNullOrWhiteSpace(campagne.Nom))
+            existing.Nom = campagne.Nom;
+        if (campagne.Description != null)
+            existing.Description = campagne.Description;
+        if (campagne.DateDebut != default)
+            existing.DateDebut = campagne.DateDebut;
+        if (campagne.DateFin != default)
+            existing.DateFin = campagne.DateFin;
+        if (campagne.Etat != default)
+            existing.Etat = campagne.Etat;
 
         await _context.SaveChangesAsync();
-        return NoContent();
+        return Ok(existing);
+    }
+
+    [HttpPost("{id}/cloturer")]
+    public async Task<IActionResult> Cloturer(int id)
+    {
+        var societeId = GetSocieteId();
+        var existing = await _context.Campagnes.FirstOrDefaultAsync(c => c.Id == id && c.SocieteId == societeId);
+        if (existing == null) return NotFound();
+
+        existing.Etat = EtatCampagne.Terminee;
+        await _context.SaveChangesAsync();
+        return Ok(existing);
     }
 
     [HttpDelete("{id}")]
