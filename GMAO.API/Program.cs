@@ -165,6 +165,25 @@ try
         db.Database.ExecuteSqlRaw(@"
             DO $$ 
             BEGIN 
+                -- Ensure SocieteId exists on RolePermissions for multi-tenant permissions
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE LOWER(table_name)='rolepermissions' AND LOWER(column_name)='societeid') THEN
+                    ALTER TABLE ""RolePermissions"" ADD COLUMN ""SocieteId"" integer NULL;
+                    BEGIN
+                        ALTER TABLE ""RolePermissions"" ADD CONSTRAINT ""FK_RolePermissions_Societes_SocieteId"" 
+                            FOREIGN KEY (""SocieteId"") REFERENCES ""Societes"" (""Id"") ON DELETE CASCADE;
+                    EXCEPTION WHEN OTHERS THEN NULL;
+                    END;
+                    BEGIN
+                        CREATE INDEX IF NOT EXISTS ""IX_RolePermissions_SocieteId"" ON ""RolePermissions"" (""SocieteId"");
+                    EXCEPTION WHEN OTHERS THEN NULL;
+                    END;
+                END IF;
+
+                -- Ensure HoursCount exists on Equipements for machine operating hours
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE LOWER(table_name)='equipements' AND LOWER(column_name)='hourscount') THEN
+                    ALTER TABLE ""Equipements"" ADD COLUMN ""HoursCount"" integer NOT NULL DEFAULT 0;
+                END IF;
+
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Localisations' AND column_name='SocieteId') THEN
                     ALTER TABLE ""Localisations"" ADD COLUMN ""SocieteId"" integer NOT NULL DEFAULT 1;
                     BEGIN
