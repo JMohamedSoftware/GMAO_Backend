@@ -972,99 +972,137 @@ public class SuperAdminController : ControllerBase
     [HttpGet("redologs")]
     public async Task<IActionResult> GetRedoLogs([FromQuery] int? societeId, [FromQuery] string? entityType)
     {
-        var redoList = new List<object>
+        var societes = await _db.Societes.IgnoreQueryFilters().ToListAsync();
+        var now = DateTime.UtcNow;
+
+        var redoList = new List<object>();
+
+        // Build mutation logs for each registered societe
+        foreach (var s in societes)
         {
-            new {
-                id = "TX-90412",
-                timestamp = DateTime.UtcNow.AddMinutes(-12).ToString("yyyy-MM-dd HH:mm:ss"),
-                tenantId = 1,
-                tenantName = "Usine Tomates POMODORO",
+            var sId = s.Id;
+            var sNom = s.Nom;
+
+            // 1. UPDATE Statut Équipement
+            redoList.Add(new {
+                id = $"TX-{sId}01",
+                timestamp = now.AddMinutes(-12).ToString("yyyy-MM-dd HH:mm:ss"),
+                tenantId = sId,
+                tenantName = sNom,
                 authorName = "Karim Ben Salah",
                 authorRole = "Technicien Électromécanicien",
                 authorAvatar = "https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=150&auto=format&fit=crop&q=80",
                 entityType = "Équipement",
-                entityId = "EQ-002",
+                entityId = $"EQ-{sId}02",
                 entityName = "Groupe Évaporateur Concentrateur N°1",
                 actionType = "UPDATE",
                 fieldName = "Statut & Santé",
-                oldValue = "Statut: 'En panne' • Indice: 35%",
-                newValue = "Statut: 'Opérationnel' • Indice: 92%",
+                oldValue = "Statut: 'En panne' • Indice santé: 32%",
+                newValue = "Statut: 'Opérationnel' • Indice santé: 94%",
                 isRollbacked = false,
                 canRollback = true
-            },
-            new {
-                id = "TX-90411",
-                timestamp = DateTime.UtcNow.AddMinutes(-34).ToString("yyyy-MM-dd HH:mm:ss"),
-                tenantId = 1,
-                tenantName = "Usine Tomates POMODORO",
-                authorName = "Sami Mansouri",
-                authorRole = "Responsable Maintenance",
+            });
+
+            // 2. UPDATE Priorité Ordre de Travail
+            redoList.Add(new {
+                id = $"TX-{sId}02",
+                timestamp = now.AddMinutes(-48).ToString("yyyy-MM-dd HH:mm:ss"),
+                tenantId = sId,
+                tenantName = sNom,
+                authorName = s.ManagerNom ?? "Sami Mansouri",
+                authorRole = "Responsable Maintenance Usine",
                 authorAvatar = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
                 entityType = "Ordre de Travail",
-                entityId = "OT-2026-003",
+                entityId = $"OT-2026-{sId}04",
                 entityName = "Remplacement garniture mécanique pompe pâteuse",
                 actionType = "UPDATE",
-                fieldName = "Priorité & Affectation",
+                fieldName = "Priorité & Technicien Assigné",
                 oldValue = "Priorité: 'Moyenne' • Assigné: 'Non assigné'",
                 newValue = "Priorité: 'Critique' • Assigné: 'Karim Ben Salah'",
                 isRollbacked = false,
                 canRollback = true
-            },
-            new {
-                id = "TX-90410",
-                timestamp = DateTime.UtcNow.AddHours(-1).ToString("yyyy-MM-dd HH:mm:ss"),
-                tenantId = 1,
-                tenantName = "Usine Tomates POMODORO",
+            });
+
+            // 3. DELETE Tâche Préventive Obsolète
+            redoList.Add(new {
+                id = $"TX-{sId}03",
+                timestamp = now.AddHours(-1).AddMinutes(-20).ToString("yyyy-MM-dd HH:mm:ss"),
+                tenantId = sId,
+                tenantName = sNom,
+                authorName = "Khaled Ammar",
+                authorRole = "Chef d'Équipe Ligne",
+                authorAvatar = "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80",
+                entityType = "Tâche Préventive",
+                entityId = $"TP-{sId}08",
+                entityName = "Contrôle hebdomadaire vanne bypass manuelle",
+                actionType = "DELETE",
+                fieldName = "Suppression Enregistrement",
+                oldValue = "Tâche active: 'Contrôle vanne bypass' (Fréquence 7j)",
+                newValue = "Entrée supprimée par le responsable de secteur",
+                isRollbacked = false,
+                canRollback = true
+            });
+
+            // 4. UPDATE Consommation Stock
+            redoList.Add(new {
+                id = $"TX-{sId}04",
+                timestamp = now.AddHours(-2).AddMinutes(-15).ToString("yyyy-MM-dd HH:mm:ss"),
+                tenantId = sId,
+                tenantName = sNom,
                 authorName = "Leila Farhat",
-                authorRole = "Magasinière Centrale",
+                authorRole = "Magasinière Centrale PDR",
                 authorAvatar = "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80",
                 entityType = "Pièce de Stock",
-                entityId = "PR-ROUL-6204",
-                entityName = "Roulement à billes SKF 6204-2RSH",
+                entityId = $"PR-ROUL-620{sId}",
+                entityName = $"Roulement SKF 6204-2RSH haute température",
                 actionType = "UPDATE",
                 fieldName = "Stock Physique",
-                oldValue = "Stock: 14 pièces",
-                newValue = "Stock: 2 pièces (Alerte seuil minimum)",
+                oldValue = "Quantité en stock: 14 pièces",
+                newValue = "Quantité en stock: 2 pièces (Alerte seuil de sécurité)",
                 isRollbacked = false,
                 canRollback = true
-            },
-            new {
-                id = "TX-90409",
-                timestamp = DateTime.UtcNow.AddHours(-2).ToString("yyyy-MM-dd HH:mm:ss"),
-                tenantId = 2,
-                tenantName = "Agro-Industrie Du Sud (SICAM)",
+            });
+
+            // 5. CREATE Incident / Alerte Ligne
+            redoList.Add(new {
+                id = $"TX-{sId}05",
+                timestamp = now.AddHours(-3).AddMinutes(-40).ToString("yyyy-MM-dd HH:mm:ss"),
+                tenantId = sId,
+                tenantName = sNom,
                 authorName = "Mohamed Ben Amor",
-                authorRole = "Chef d'Équipe Ligne 2",
-                authorAvatar = "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80",
+                authorRole = "Opérateur Ligne Broyage",
+                authorAvatar = "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&auto=format&fit=crop&q=80",
                 entityType = "Incident",
-                entityId = "INC-2026-089",
-                entityName = "Fuite vapeur sur vanne d'admission cuiseur",
+                entityId = $"INC-2026-{sId}91",
+                entityName = "Vibration anormale sur palier moteur broyeur",
                 actionType = "CREATE",
-                fieldName = "Déclaration Panne",
-                oldValue = "N/A (Création)",
-                newValue = "Incident déclaré avec urgence Haute sur Cuiseur C-02",
+                fieldName = "Déclaration Panne Ligne",
+                oldValue = "N/A (Nouvel Incident)",
+                newValue = "Incident déclaré avec urgence Haute sur Broyeur Principal",
                 isRollbacked = false,
                 canRollback = true
-            },
-            new {
-                id = "TX-90408",
-                timestamp = DateTime.UtcNow.AddHours(-4).ToString("yyyy-MM-dd HH:mm:ss"),
-                tenantId = 1,
-                tenantName = "Usine Tomates POMODORO",
-                authorName = "Admin Système",
-                authorRole = "SuperAdmin",
-                authorAvatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-                entityType = "Campagne",
-                entityId = "CAMP-2025",
-                entityName = "Campagne Tomates 2025",
-                actionType = "UPDATE",
-                fieldName = "État Clôture",
-                oldValue = "État: 'En cours'",
-                newValue = "État: 'Clôturée' (Mode Archive verrouillé)",
+            });
+
+            // 6. DELETE Ordre de Travail Annulé
+            redoList.Add(new {
+                id = $"TX-{sId}06",
+                timestamp = now.AddHours(-5).ToString("yyyy-MM-dd HH:mm:ss"),
+                tenantId = sId,
+                tenantName = sNom,
+                authorName = s.ManagerNom ?? "Sami Mansouri",
+                authorRole = "Responsable Maintenance Usine",
+                authorAvatar = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
+                entityType = "Ordre de Travail",
+                entityId = $"OT-2026-{sId}02",
+                entityName = "Nettoyage chimique échangeur tubulaire N°2",
+                actionType = "DELETE",
+                fieldName = "Annulation & Suppression OT",
+                oldValue = "OT #OT-2026-002: Statut 'En attente' (Créé le 15/11)",
+                newValue = "OT annulé et purgé du planning de maintenance",
                 isRollbacked = false,
                 canRollback = true
-            }
-        };
+            });
+        }
 
         if (societeId.HasValue && societeId.Value > 0)
         {
