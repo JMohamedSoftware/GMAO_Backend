@@ -318,6 +318,17 @@ public class SuperAdminController : ControllerBase
             _db.SitesUsines.Add(defaultSite);
             await _db.SaveChangesAsync();
 
+            // Création automatique de la première usine dans l'arborescence technique (Loi ISO 14224)
+            var defaultLoc = new Localisation
+            {
+                SocieteId = tenant.Id,
+                Nom = $"Usine {tenant.Nom}",
+                Description = $"Site et usine principale de {tenant.Nom}",
+                ParentId = null
+            };
+            _db.Localisations.Add(defaultLoc);
+            await _db.SaveChangesAsync();
+
             await LogAuditAsync("Création Entreprise", "Tenant", $"Nouvelle entreprise enregistrée: {tenant.Nom} avec compte Admin {adminUser?.Email}");
 
             await tx.CommitAsync();

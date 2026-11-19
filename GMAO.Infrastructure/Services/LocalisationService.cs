@@ -17,8 +17,45 @@ namespace GMAO.Infrastructure.Services
             _context = context;
         }
 
+        private async Task EnsureDefaultLocalisationAsync(int societeId)
+        {
+            var exists = await _context.Localisations.AnyAsync(l => l.SocieteId == societeId);
+            if (!exists)
+            {
+                var soc = await _context.Societes.IgnoreQueryFilters().FirstOrDefaultAsync(s => s.Id == societeId);
+                if (soc != null)
+                {
+                    var defaultLoc = new Localisation
+                    {
+                        SocieteId = soc.Id,
+                        Nom = $"Usine {soc.Nom}",
+                        Description = $"Site et usine principale de {soc.Nom}",
+                        ParentId = null
+                    };
+                    _context.Localisations.Add(defaultLoc);
+                    await _context.SaveChangesAsync();
+
+                    // Rattacher automatiquement les équipements orphelins existants à cette usine
+                    var orphanEquipments = await _context.Equipements.Where(e => e.SocieteId == soc.Id && e.LocalisationId == null).ToListAsync();
+                    foreach (var eq in orphanEquipments)
+                    {
+                        eq.LocalisationId = defaultLoc.Id;
+                    }
+                    if (orphanEquipments.Any())
+                    {
+                        await _context.SaveChangesAsync();
+                    }
+                }
+            }
+        }
+
         public async Task<IEnumerable<Localisation>> GetAllAsync(int? societeId = null)
         {
+            if (societeId.HasValue && societeId.Value > 0)
+            {
+                await EnsureDefaultLocalisationAsync(societeId.Value);
+            }
+
             var query = _context.Localisations.Include(l => l.SousLocalisations).AsQueryable();
             if (societeId.HasValue && societeId.Value > 0)
             {
@@ -88,6 +125,11 @@ namespace GMAO.Infrastructure.Services
 
         public async Task<IEnumerable<Localisation>> GetTreeAsync(int? societeId = null)
         {
+            if (societeId.HasValue && societeId.Value > 0)
+            {
+                await EnsureDefaultLocalisationAsync(societeId.Value);
+            }
+
             var query = _context.Localisations.AsQueryable();
             if (societeId.HasValue && societeId.Value > 0)
             {
