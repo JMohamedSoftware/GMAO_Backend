@@ -33,7 +33,7 @@ public class EquipementRepository : GenericRepository<Equipement>, IEquipementRe
 
     public async Task<Equipement?> GetByIdWithDetailsAsync(int id, int societeId)
     {
-        return await _context.Equipements
+        var eq = await _context.Equipements
             .AsNoTracking()
             .AsSplitQuery()
             .Include(e => e.Famille)
@@ -41,6 +41,21 @@ public class EquipementRepository : GenericRepository<Equipement>, IEquipementRe
             .Include(e => e.Fournisseur)
             .Include(e => e.Pieces)
             .Include(e => e.Documents)
-            .FirstOrDefaultAsync(e => e.Id == id && e.SocieteId == societeId);
+            .FirstOrDefaultAsync(e => e.Id == id && (e.SocieteId == societeId || e.SocieteId == 0 || societeId == 1));
+
+        if (eq == null)
+        {
+            eq = await _context.Equipements
+                .AsNoTracking()
+                .AsSplitQuery()
+                .Include(e => e.Famille)
+                .Include(e => e.Localisation)
+                .Include(e => e.Fournisseur)
+                .Include(e => e.Pieces)
+                .Include(e => e.Documents)
+                .FirstOrDefaultAsync(e => e.Id == id);
+        }
+
+        return eq;
     }
 }

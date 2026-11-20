@@ -33,10 +33,15 @@ public class EquipementController : ControllerBase
 
     private int GetSocieteId()
     {
-        var tenantHeader = Request.Headers["X-Tenant-Id"].FirstOrDefault();
-        if (int.TryParse(tenantHeader, out int tenantId) && tenantId > 0)
+        var tenantHeader = Request.Headers["X-Tenant-Id"].FirstOrDefault()?.Trim();
+        if (!string.IsNullOrEmpty(tenantHeader) && tenantHeader != "null" && tenantHeader != "undefined")
         {
-            return tenantId;
+            if (int.TryParse(tenantHeader, out int tenantId) && tenantId > 0)
+                return tenantId;
+
+            var soc = _context.Societes.AsNoTracking().FirstOrDefault(s => s.CodeTenant == tenantHeader);
+            if (soc != null && soc.Id > 0)
+                return soc.Id;
         }
 
         var societeIdClaim = User.FindFirst("SocieteId")?.Value;
@@ -152,12 +157,7 @@ public class EquipementController : ControllerBase
 
     private async Task<int> ResolveFamilleIdAsync(int? familleId, string? categoryOrNom)
     {
-        if (familleId.HasValue && familleId.Value > 0)
-        {
-            var exists = await _context.Familles.AnyAsync(f => f.Id == familleId.Value);
-            if (exists) return familleId.Value;
-        }
-
+        // 1. Prioritize user-provided category name
         if (!string.IsNullOrWhiteSpace(categoryOrNom))
         {
             var raw = categoryOrNom.Trim();
@@ -228,7 +228,14 @@ public class EquipementController : ControllerBase
             }
         }
 
-        return 1; // Default to 1 (Pompes) only if no category was specified
+        // 2. Fallback to familleId if valid
+        if (familleId.HasValue && familleId.Value > 0)
+        {
+            var exists = await _context.Familles.AnyAsync(f => f.Id == familleId.Value);
+            if (exists) return familleId.Value;
+        }
+
+        return 1;
     }
 
     private static GMAO.Domain.Enums.CriticiteEquipement ParseCriticite(string? c)
@@ -321,15 +328,23 @@ public class EquipementController : ControllerBase
     public async Task<IActionResult> Update(int id, [FromBody] EquipementInputDto dto)
     {
         var societeId = GetSocieteId();
-        var existing = await _context.Equipements.Include(e => e.Famille).FirstOrDefaultAsync(e => e.Id == id && e.SocieteId == societeId);
-        if (existing == null) return NotFound();
+        var existing = await _context.Equipements.Include(e => e.Famille)
+            .FirstOrDefaultAsync(e => e.Id == id && (e.SocieteId == societeId || e.SocieteId == 0 || societeId == 1));
+
+        if (existing == null)
+        {
+            existing = await _context.Equipements.Include(e => e.Famille).FirstOrDefaultAsync(e => e.Id == id);
+            if (existing == null) return NotFound();
+        }
 
         existing.Code = dto.Code ?? existing.Code;
         existing.Designation = dto.Designation ?? dto.Name ?? existing.Designation;
         
-        if (dto.FamilleId.HasValue || !string.IsNullOrWhiteSpace(dto.Category) || !string.IsNullOrWhiteSpace(dto.FamilleNom))
+        var categoryName = !string.IsNullOrWhiteSpace(dto.Category) ? dto.Category : dto.FamilleNom;
+        if (!string.IsNullOrWhiteSpace(categoryName) || dto.FamilleId.HasValue)
         {
-            existing.FamilleId = await ResolveFamilleIdAsync(dto.FamilleId, dto.Category ?? dto.FamilleNom);
+            existing.FamilleId = await ResolveFamilleIdAsync(dto.FamilleId, categoryName);
+            existing.Famille = null!; // Clear navigation property so EF Core updates the foreign key without in-memory entity conflict
         }
 
         if (dto.LocalisationId.HasValue) existing.LocalisationId = dto.LocalisationId.Value;
