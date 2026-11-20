@@ -91,6 +91,7 @@ public class OrdresTravailController : ControllerBase
     {
         int societeId = GetSocieteId();
         var ordres = await _context.OrdresTravail
+            .AsNoTracking()
             .Include(o => o.Campagne)
             .Where(o => o.SocieteId == societeId)
             .ToListAsync();
@@ -102,6 +103,7 @@ public class OrdresTravailController : ControllerBase
     {
         int societeId = GetSocieteId();
         var ordre = await _context.OrdresTravail
+            .AsNoTracking()
             .FirstOrDefaultAsync(o => o.Id == id && o.SocieteId == societeId);
         if (ordre == null) return NotFound();
         return Ok(ordre);

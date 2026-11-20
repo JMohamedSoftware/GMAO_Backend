@@ -42,6 +42,7 @@ public class PiecesController : ControllerBase
     {
         int societeId = GetSocieteId();
         var pieces = await _context.Pieces
+            .AsNoTracking()
             .Where(p => p.SocieteId == societeId || (societeId == 1 && (p.SocieteId == null || p.SocieteId == 0)))
             .OrderBy(p => p.Reference)
             .ToListAsync();
@@ -53,6 +54,7 @@ public class PiecesController : ControllerBase
     {
         int societeId = GetSocieteId();
         var piece = await _context.Pieces
+            .AsNoTracking()
             .FirstOrDefaultAsync(p => p.Id == id && (p.SocieteId == societeId || (societeId == 1 && (p.SocieteId == null || p.SocieteId == 0))));
         if (piece == null) return NotFound();
         return Ok(piece);

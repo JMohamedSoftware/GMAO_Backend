@@ -41,9 +41,11 @@ public class MouvementsStockController : ControllerBase
     {
         int societeId = GetSocieteId();
         var mouvements = await context.MouvementsStock
+            .AsNoTracking()
             .Include(m => m.Piece)
             .Where(m => m.Piece != null && m.Piece.SocieteId == societeId)
             .OrderByDescending(m => m.Date)
+            .Take(200)
             .ToListAsync();
         return Ok(mouvements);
     }

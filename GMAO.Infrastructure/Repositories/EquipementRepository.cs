@@ -20,6 +20,8 @@ public class EquipementRepository : GenericRepository<Equipement>, IEquipementRe
     public async Task<System.Collections.Generic.IEnumerable<Equipement>> GetAllWithDetailsAsync(int societeId)
     {
         return await _context.Equipements
+            .AsNoTracking()
+            .AsSplitQuery()
             .Include(e => e.Famille)
             .Include(e => e.Localisation)
             .Include(e => e.Fournisseur)
@@ -32,6 +34,8 @@ public class EquipementRepository : GenericRepository<Equipement>, IEquipementRe
     public async Task<Equipement?> GetByIdWithDetailsAsync(int id, int societeId)
     {
         return await _context.Equipements
+            .AsNoTracking()
+            .AsSplitQuery()
             .Include(e => e.Famille)
             .Include(e => e.Localisation)
             .Include(e => e.Fournisseur)

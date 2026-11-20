@@ -43,6 +43,7 @@ public class IncidentsController : ControllerBase
     {
         int societeId = GetSocieteId();
         var incidents = await _context.DemandesIntervention
+            .AsNoTracking()
             .Where(i => i.SocieteId == societeId)
             .ToListAsync();
         return Ok(incidents);
@@ -53,6 +54,7 @@ public class IncidentsController : ControllerBase
     {
         int societeId = GetSocieteId();
         var incident = await _context.DemandesIntervention
+            .AsNoTracking()
             .FirstOrDefaultAsync(i => i.Id == id && i.SocieteId == societeId);
         if (incident == null) return NotFound();
         return Ok(incident);

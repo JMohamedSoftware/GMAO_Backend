@@ -16,6 +16,7 @@ public class UserRepository : GenericRepository<User>, IUserRepository
     public override async Task<IEnumerable<User>> GetAllAsync()
     {
         return await _context.Users
+            .AsNoTracking()
             .Include(u => u.Role)
                 .ThenInclude(r => r.RolePermissions)
             .Include(u => u.Societe)

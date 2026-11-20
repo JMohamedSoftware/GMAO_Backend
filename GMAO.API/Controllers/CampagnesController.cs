@@ -42,6 +42,7 @@ public class CampagnesController : ControllerBase
     {
         var societeId = GetSocieteId();
         var campagnes = await _context.Campagnes
+            .AsNoTracking()
             .Where(c => c.SocieteId == societeId)
             .OrderByDescending(c => c.DateDebut)
             .ToListAsync();
