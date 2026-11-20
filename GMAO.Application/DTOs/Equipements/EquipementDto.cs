@@ -34,28 +34,28 @@ public class EquipementDto
 
 public class EquipementInputDto
 {
-    public int? Id { get; set; }
+    public object? Id { get; set; }
     public string? Code { get; set; }
     public string? Designation { get; set; }
     public string? Name { get; set; }
-    public int? FamilleId { get; set; }
+    public object? FamilleId { get; set; }
     public string? FamilleNom { get; set; }
     public string? Category { get; set; }
-    public int? LocalisationId { get; set; }
+    public object? LocalisationId { get; set; }
     public string? Marque { get; set; }
     public string? Brand { get; set; }
     public string? Modele { get; set; }
     public string? Model { get; set; }
     public string? NumeroSerie { get; set; }
     public string? SerialNumber { get; set; }
-    public DateOnly? DateAchat { get; set; }
-    public DateOnly? DateMiseEnService { get; set; }
-    public DateOnly? DateFinGarantie { get; set; }
-    public string? Criticite { get; set; }
-    public string? Criticality { get; set; }
-    public string? Etat { get; set; }
-    public string? Status { get; set; }
-    public int? FournisseurId { get; set; }
+    public object? DateAchat { get; set; }
+    public object? DateMiseEnService { get; set; }
+    public object? DateFinGarantie { get; set; }
+    public object? Criticite { get; set; }
+    public object? Criticality { get; set; }
+    public object? Etat { get; set; }
+    public object? Status { get; set; }
+    public object? FournisseurId { get; set; }
     public string? PhotoUrl { get; set; }
     public string? Notes { get; set; }
 }
