@@ -65,6 +65,19 @@ public class IncidentsController : ControllerBase
     {
         int societeId = GetSocieteId();
         incident.SocieteId = societeId;
+
+        // Auto-assign authenticated user as Demandeur if not set or <= 0
+        if (incident.DemandeurId <= 0)
+        {
+            var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value 
+                ?? User.FindFirst("id")?.Value 
+                ?? User.FindFirst("sub")?.Value;
+            if (int.TryParse(userIdClaim, out int currentUserId) && currentUserId > 0)
+            {
+                incident.DemandeurId = currentUserId;
+            }
+        }
+
         await _repository.AddAsync(incident);
 
         // If priority is Haute or Critique, set equipment to EnPanne
