@@ -23,6 +23,17 @@ public class PlansPreventifController : ControllerBase
         _otRepository = otRepository;
     }
 
+    private static DateTime? ToUtc(DateTime? d)
+    {
+        if (d == null) return null;
+        return d.Value.Kind switch
+        {
+            DateTimeKind.Utc   => d,
+            DateTimeKind.Local => d.Value.ToUniversalTime(),
+            _                  => DateTime.SpecifyKind(d.Value, DateTimeKind.Utc)
+        };
+    }
+
     // ── GET /api/PlansPreventif ───────────────────────────────────────────────
     [HttpGet]
     public async Task<IActionResult> GetAll()
@@ -109,8 +120,8 @@ public class PlansPreventifController : ControllerBase
             TypeDeclenchement = (TypeDeclenchement)req.TypeDeclenchement,
             Frequence         = req.Frequence,
             UniteMesure       = req.UniteMesure,
-            DerniereDate      = req.DerniereDate,
-            ProchaineDate     = req.ProchaineDate,
+            DerniereDate      = ToUtc(req.DerniereDate),
+            ProchaineDate     = ToUtc(req.ProchaineDate),
             Actif             = true,
             Taches            = req.Taches?.Select((t, i) => new TachePreventive
             {
@@ -143,8 +154,8 @@ public class PlansPreventifController : ControllerBase
         existing.TypeDeclenchement = (TypeDeclenchement)req.TypeDeclenchement;
         existing.Frequence         = req.Frequence;
         existing.UniteMesure       = req.UniteMesure;
-        existing.DerniereDate      = req.DerniereDate;
-        existing.ProchaineDate     = req.ProchaineDate;
+        existing.DerniereDate      = ToUtc(req.DerniereDate);
+        existing.ProchaineDate     = ToUtc(req.ProchaineDate);
 
         // Replace taches
         _context.TachesPreventives.RemoveRange(existing.Taches);
@@ -188,14 +199,27 @@ public class PlansPreventifController : ControllerBase
 
         // Calcul de la prochaine date selon la fréquence
         var now = DateTime.UtcNow;
-        var prochaine = plan.UniteMesure?.ToLower() switch
+        bool isSaisonnier = plan.TypeDeclenchement == TypeDeclenchement.Saisonnier 
+            || (plan.UniteMesure != null && (plan.UniteMesure.ToLower() == "saisonnier" || plan.UniteMesure.ToLower() == "hiver" || plan.UniteMesure.ToLower() == "printemps" || plan.UniteMesure.ToLower() == "été" || plan.UniteMesure.ToLower() == "ete" || plan.UniteMesure.ToLower() == "automne"));
+
+        DateTime prochaine;
+        if (isSaisonnier)
         {
-            "jours"  => now.AddDays(plan.Frequence),
-            "semaines" => now.AddDays(plan.Frequence * 7),
-            "mois"   => now.AddMonths(plan.Frequence),
-            "heures" => now.AddDays(Math.Max(1, (int)Math.Ceiling(plan.Frequence / 24.0))),
-            _        => now.AddDays(plan.Frequence)
-        };
+            // Saisonnier : prochaine intervention dans la prochaine saison (au moins 3 mois)
+            prochaine = now.AddMonths(plan.Frequence > 0 ? plan.Frequence * 3 : 3);
+        }
+        else
+        {
+            prochaine = plan.UniteMesure?.ToLower() switch
+            {
+                "jours"    => now.AddDays(plan.Frequence > 0 ? plan.Frequence : 1),
+                "semaines" => now.AddDays(plan.Frequence > 0 ? plan.Frequence * 7 : 7),
+                "mois"     => now.AddMonths(plan.Frequence > 0 ? plan.Frequence : 1),
+                "heures"   => now.AddDays(Math.Max(1, (int)Math.Ceiling((plan.Frequence > 0 ? plan.Frequence : 24) / 24.0))),
+                _          => now.AddDays(plan.Frequence > 0 ? plan.Frequence : 30)
+            };
+        }
+        DateTime prochaineUtc = ToUtc(prochaine) ?? DateTime.UtcNow.AddDays(30);
 
         // Récupérer l'ID du responsable depuis le JWT
         var responsableIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -257,7 +281,7 @@ public class PlansPreventifController : ControllerBase
 
         // Mise à jour du plan
         plan.DerniereDate  = now;
-        plan.ProchaineDate = prochaine;
+        plan.ProchaineDate = prochaineUtc;
         await _context.SaveChangesAsync();
 
         return Ok(new
@@ -275,7 +299,7 @@ public class PlansPreventifController : ControllerBase
         var plan = await _context.PlansPreventifs.FindAsync(id);
         if (plan == null) return NotFound();
 
-        plan.ProchaineDate = req.NouvelleDate;
+        plan.ProchaineDate = ToUtc(req.NouvelleDate);
         await _context.SaveChangesAsync();
 
         return Ok(new { plan.Id, plan.ProchaineDate });
