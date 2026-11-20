@@ -1,6 +1,7 @@
 using System.Threading.Tasks;
 using GMAO.Application.Interfaces;
 using GMAO.Application.DTOs.Auth;
+using GMAO.Application.Services;
 using GMAO.Domain.Entities;
 using GMAO.Domain.Interfaces;
 using Microsoft.AspNetCore.Mvc;
@@ -95,6 +96,7 @@ public class UsersController : ControllerBase
         if (dto.RoleId.HasValue) user.RoleId = dto.RoleId.Value;
         if (dto.IsActive.HasValue) user.IsActive = dto.IsActive.Value;
         if (dto.Avatar != null) user.Avatar = dto.Avatar;
+        if (!string.IsNullOrWhiteSpace(dto.Password)) user.PasswordHash = PasswordHasher.HashPassword(dto.Password);
 
         await _userRepository.UpdateAsync(user);
         return Ok(user);

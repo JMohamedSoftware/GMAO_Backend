@@ -9,4 +9,5 @@ public class UpdateUserDto
     public int? RoleId { get; set; }
     public bool? IsActive { get; set; }
     public string? Avatar { get; set; }
+    public string? Password { get; set; }
 }
