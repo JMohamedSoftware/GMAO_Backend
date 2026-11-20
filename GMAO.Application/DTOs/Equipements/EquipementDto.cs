@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace GMAO.Application.DTOs.Equipements;
 
@@ -10,6 +11,7 @@ public class EquipementDto
     public string Designation { get; set; } = string.Empty;
     public int FamilleId { get; set; }
     public string FamilleNom { get; set; } = string.Empty;
+    public string Category => FamilleNom;
     public int? LocalisationId { get; set; }
     public string LocalisationNom { get; set; } = string.Empty;
     public string? Marque { get; set; }
@@ -28,4 +30,32 @@ public class EquipementDto
     public DateTime UpdatedAt { get; set; }
     public List<int> PiecesIds { get; set; } = new List<int>();
     public List<GMAO.Application.DTOs.Documents.DocumentDto> Documents { get; set; } = new();
+}
+
+public class EquipementInputDto
+{
+    public int? Id { get; set; }
+    public string? Code { get; set; }
+    public string? Designation { get; set; }
+    public string? Name { get; set; }
+    public int? FamilleId { get; set; }
+    public string? FamilleNom { get; set; }
+    public string? Category { get; set; }
+    public int? LocalisationId { get; set; }
+    public string? Marque { get; set; }
+    public string? Brand { get; set; }
+    public string? Modele { get; set; }
+    public string? Model { get; set; }
+    public string? NumeroSerie { get; set; }
+    public string? SerialNumber { get; set; }
+    public DateOnly? DateAchat { get; set; }
+    public DateOnly? DateMiseEnService { get; set; }
+    public DateOnly? DateFinGarantie { get; set; }
+    public string? Criticite { get; set; }
+    public string? Criticality { get; set; }
+    public string? Etat { get; set; }
+    public string? Status { get; set; }
+    public int? FournisseurId { get; set; }
+    public string? PhotoUrl { get; set; }
+    public string? Notes { get; set; }
 }

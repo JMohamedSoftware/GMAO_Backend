@@ -150,60 +150,208 @@ public class EquipementController : ControllerBase
         return Ok(dto);
     }
 
+    private async Task<int> ResolveFamilleIdAsync(int? familleId, string? categoryOrNom)
+    {
+        if (familleId.HasValue && familleId.Value > 0)
+        {
+            var exists = await _context.Familles.AnyAsync(f => f.Id == familleId.Value);
+            if (exists) return familleId.Value;
+        }
+
+        if (!string.IsNullOrWhiteSpace(categoryOrNom))
+        {
+            var raw = categoryOrNom.Trim();
+            var lower = raw.ToLower();
+
+            // Direct match in DB
+            var direct = await _context.Familles.FirstOrDefaultAsync(f => f.Nom.ToLower() == lower);
+            if (direct != null) return direct.Id;
+
+            // Keyword fuzzy match
+            if (lower.Contains("chaud") || lower.Contains("chod")) // Chaudières, Chaudière, chodir, chaudiere
+            {
+                var chaud = await _context.Familles.FirstOrDefaultAsync(f => f.Nom.ToLower().Contains("chaud"));
+                if (chaud != null) return chaud.Id;
+            }
+            else if (lower.Contains("pomp")) // Pompes, Pompe
+            {
+                var pomp = await _context.Familles.FirstOrDefaultAsync(f => f.Nom.ToLower().Contains("pomp"));
+                if (pomp != null) return pomp.Id;
+            }
+            else if (lower.Contains("convoy"))
+            {
+                var conv = await _context.Familles.FirstOrDefaultAsync(f => f.Nom.ToLower().Contains("convoy"));
+                if (conv != null) return conv.Id;
+            }
+            else if (lower.Contains("compress"))
+            {
+                var comp = await _context.Familles.FirstOrDefaultAsync(f => f.Nom.ToLower().Contains("compress"));
+                if (comp != null) return comp.Id;
+            }
+            else if (lower.Contains("moteur"))
+            {
+                var mot = await _context.Familles.FirstOrDefaultAsync(f => f.Nom.ToLower().Contains("moteur"));
+                if (mot != null) return mot.Id;
+            }
+            else if (lower.Contains("refrig") || lower.Contains("réfrig") || lower.Contains("frigo"))
+            {
+                var refg = await _context.Familles.FirstOrDefaultAsync(f => f.Nom.ToLower().Contains("réfrig"));
+                if (refg != null) return refg.Id;
+            }
+            else if (lower.Contains("steril") || lower.Contains("stéril") || lower.Contains("autoclave"))
+            {
+                var ster = await _context.Familles.FirstOrDefaultAsync(f => f.Nom.ToLower().Contains("stéril"));
+                if (ster != null) return ster.Id;
+            }
+            else if (lower.Contains("rempliss") || lower.Contains("dos"))
+            {
+                var remp = await _context.Familles.FirstOrDefaultAsync(f => f.Nom.ToLower().Contains("rempliss"));
+                if (remp != null) return remp.Id;
+            }
+
+            // Create new Famille in PostgreSQL DB for custom category
+            try
+            {
+                var newFam = new Famille
+                {
+                    Nom = raw,
+                    Description = $"Famille {raw}"
+                };
+                _context.Familles.Add(newFam);
+                await _context.SaveChangesAsync();
+                return newFam.Id;
+            }
+            catch
+            {
+                var fallback = await _context.Familles.FirstOrDefaultAsync(f => f.Nom.ToLower() == lower);
+                if (fallback != null) return fallback.Id;
+            }
+        }
+
+        return 1; // Default to 1 (Pompes) only if no category was specified
+    }
+
+    private static GMAO.Domain.Enums.CriticiteEquipement ParseCriticite(string? c)
+    {
+        if (string.IsNullOrWhiteSpace(c)) return GMAO.Domain.Enums.CriticiteEquipement.Moyenne;
+        var s = c.Trim().ToLower().Replace(" ", "").Replace("_", "");
+        if (s == "1" || s == "faible" || s == "low") return GMAO.Domain.Enums.CriticiteEquipement.Faible;
+        if (s == "2" || s == "moyenne" || s == "medium") return GMAO.Domain.Enums.CriticiteEquipement.Moyenne;
+        if (s == "3" || s == "haute" || s == "high") return GMAO.Domain.Enums.CriticiteEquipement.Haute;
+        if (s == "4" || s == "critique" || s == "critical") return GMAO.Domain.Enums.CriticiteEquipement.Critique;
+        return GMAO.Domain.Enums.CriticiteEquipement.Moyenne;
+    }
+
+    private static GMAO.Domain.Enums.EtatEquipement ParseEtat(string? e)
+    {
+        if (string.IsNullOrWhiteSpace(e)) return GMAO.Domain.Enums.EtatEquipement.EnService;
+        var s = e.Trim().ToLower().Replace(" ", "").Replace("_", "");
+        if (s == "1" || s == "enservice" || s == "service") return GMAO.Domain.Enums.EtatEquipement.EnService;
+        if (s == "2" || s == "enpanne" || s == "panne") return GMAO.Domain.Enums.EtatEquipement.EnPanne;
+        if (s == "3" || s == "enmaintenance" || s == "maintenance") return GMAO.Domain.Enums.EtatEquipement.EnMaintenance;
+        if (s == "4" || s == "horsservice") return GMAO.Domain.Enums.EtatEquipement.HorsService;
+        if (s == "5" || s == "enattente") return GMAO.Domain.Enums.EtatEquipement.EnAttente;
+        return GMAO.Domain.Enums.EtatEquipement.EnService;
+    }
+
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] Equipement equipement)
+    public async Task<IActionResult> Create([FromBody] EquipementInputDto dto)
     {
         var societeId = GetSocieteId();
-        equipement.SocieteId = societeId;
+        
+        var designation = dto.Designation ?? dto.Name ?? "Nouvel Équipement";
+        var code = string.IsNullOrWhiteSpace(dto.Code) ? $"EQ-{DateTime.UtcNow.Ticks % 100000:D5}" : dto.Code;
+        var familleId = await ResolveFamilleIdAsync(dto.FamilleId, dto.Category ?? dto.FamilleNom);
 
-        if (string.IsNullOrWhiteSpace(equipement.Code))
+        var equipement = new Equipement
         {
-            equipement.Code = $"EQ-{DateTime.UtcNow.Ticks % 100000:D5}";
-        }
-
-        if (equipement.FamilleId <= 0)
-        {
-            equipement.FamilleId = 1;
-        }
-
-        if ((int)equipement.Etat <= 0)
-        {
-            equipement.Etat = GMAO.Domain.Enums.EtatEquipement.EnService;
-        }
-
-        if ((int)equipement.Criticite <= 0)
-        {
-            equipement.Criticite = GMAO.Domain.Enums.CriticiteEquipement.Moyenne;
-        }
+            SocieteId = societeId,
+            Code = code,
+            Designation = designation,
+            FamilleId = familleId,
+            LocalisationId = dto.LocalisationId,
+            Marque = dto.Marque ?? dto.Brand,
+            Modele = dto.Modele ?? dto.Model,
+            NumeroSerie = dto.NumeroSerie ?? dto.SerialNumber,
+            DateAchat = dto.DateAchat,
+            DateMiseEnService = dto.DateMiseEnService ?? DateOnly.FromDateTime(DateTime.UtcNow),
+            DateFinGarantie = dto.DateFinGarantie,
+            Criticite = ParseCriticite(dto.Criticite ?? dto.Criticality),
+            Etat = ParseEtat(dto.Etat ?? dto.Status),
+            FournisseurId = dto.FournisseurId,
+            PhotoUrl = dto.PhotoUrl,
+            Notes = dto.Notes,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
         
         await _equipementRepository.AddAsync(equipement);
-        return CreatedAtAction(nameof(GetById), new { id = equipement.Id }, equipement);
+        
+        var created = await _equipementRepository.GetByIdWithDetailsAsync(equipement.Id, societeId);
+        var resDto = new EquipementDto
+        {
+            Id = created?.Id ?? equipement.Id,
+            SocieteId = societeId,
+            Code = created?.Code ?? equipement.Code,
+            Designation = created?.Designation ?? equipement.Designation,
+            FamilleId = created?.FamilleId ?? equipement.FamilleId,
+            FamilleNom = created?.Famille?.Nom ?? "",
+            LocalisationId = created?.LocalisationId ?? equipement.LocalisationId,
+            LocalisationNom = created?.Localisation?.Nom ?? "",
+            Marque = created?.Marque ?? equipement.Marque,
+            Modele = created?.Modele ?? equipement.Modele,
+            NumeroSerie = created?.NumeroSerie ?? equipement.NumeroSerie,
+            DateAchat = created?.DateAchat ?? equipement.DateAchat,
+            DateMiseEnService = created?.DateMiseEnService ?? equipement.DateMiseEnService,
+            DateFinGarantie = created?.DateFinGarantie ?? equipement.DateFinGarantie,
+            Criticite = (int)(created?.Criticite ?? equipement.Criticite) == 0 ? "Moyenne" : (created?.Criticite ?? equipement.Criticite).ToString(),
+            Etat = (int)(created?.Etat ?? equipement.Etat) == 0 ? "EnService" : (created?.Etat ?? equipement.Etat).ToString(),
+            FournisseurId = created?.FournisseurId ?? equipement.FournisseurId,
+            FournisseurNom = created?.Fournisseur?.Nom,
+            PhotoUrl = created?.PhotoUrl ?? equipement.PhotoUrl,
+            Notes = created?.Notes ?? equipement.Notes,
+            CreatedAt = created?.CreatedAt ?? equipement.CreatedAt,
+            UpdatedAt = created?.UpdatedAt ?? equipement.UpdatedAt
+        };
+
+        return CreatedAtAction(nameof(GetById), new { id = resDto.Id }, resDto);
     }
 
     [HttpPut("{id}")]
-    public async Task<IActionResult> Update(int id, [FromBody] Equipement equipement)
+    public async Task<IActionResult> Update(int id, [FromBody] EquipementInputDto dto)
     {
-        if (id != equipement.Id) return BadRequest();
-        
         var societeId = GetSocieteId();
-        var existing = await _context.Equipements.FirstOrDefaultAsync(e => e.Id == id && e.SocieteId == societeId);
+        var existing = await _context.Equipements.Include(e => e.Famille).FirstOrDefaultAsync(e => e.Id == id && e.SocieteId == societeId);
         if (existing == null) return NotFound();
 
-        existing.Code = equipement.Code ?? existing.Code;
-        existing.Designation = equipement.Designation ?? existing.Designation;
-        if (equipement.FamilleId > 0) existing.FamilleId = equipement.FamilleId;
-        existing.LocalisationId = equipement.LocalisationId ?? existing.LocalisationId;
-        existing.Marque = equipement.Marque ?? existing.Marque;
-        existing.Modele = equipement.Modele ?? existing.Modele;
-        existing.NumeroSerie = equipement.NumeroSerie ?? existing.NumeroSerie;
-        existing.DateAchat = equipement.DateAchat ?? existing.DateAchat;
-        existing.DateMiseEnService = equipement.DateMiseEnService ?? existing.DateMiseEnService;
-        existing.DateFinGarantie = equipement.DateFinGarantie ?? existing.DateFinGarantie;
-        if ((int)equipement.Criticite > 0) existing.Criticite = equipement.Criticite;
-        if ((int)equipement.Etat > 0) existing.Etat = equipement.Etat;
-        existing.FournisseurId = equipement.FournisseurId ?? existing.FournisseurId;
-        existing.PhotoUrl = equipement.PhotoUrl ?? existing.PhotoUrl;
-        existing.Notes = equipement.Notes ?? existing.Notes;
+        existing.Code = dto.Code ?? existing.Code;
+        existing.Designation = dto.Designation ?? dto.Name ?? existing.Designation;
+        
+        if (dto.FamilleId.HasValue || !string.IsNullOrWhiteSpace(dto.Category) || !string.IsNullOrWhiteSpace(dto.FamilleNom))
+        {
+            existing.FamilleId = await ResolveFamilleIdAsync(dto.FamilleId, dto.Category ?? dto.FamilleNom);
+        }
+
+        if (dto.LocalisationId.HasValue) existing.LocalisationId = dto.LocalisationId.Value;
+        existing.Marque = dto.Marque ?? dto.Brand ?? existing.Marque;
+        existing.Modele = dto.Modele ?? dto.Model ?? existing.Modele;
+        existing.NumeroSerie = dto.NumeroSerie ?? dto.SerialNumber ?? existing.NumeroSerie;
+        existing.DateAchat = dto.DateAchat ?? existing.DateAchat;
+        existing.DateMiseEnService = dto.DateMiseEnService ?? existing.DateMiseEnService;
+        existing.DateFinGarantie = dto.DateFinGarantie ?? existing.DateFinGarantie;
+        
+        if (!string.IsNullOrWhiteSpace(dto.Criticite) || !string.IsNullOrWhiteSpace(dto.Criticality))
+        {
+            existing.Criticite = ParseCriticite(dto.Criticite ?? dto.Criticality);
+        }
+        if (!string.IsNullOrWhiteSpace(dto.Etat) || !string.IsNullOrWhiteSpace(dto.Status))
+        {
+            existing.Etat = ParseEtat(dto.Etat ?? dto.Status);
+        }
+
+        existing.FournisseurId = dto.FournisseurId ?? existing.FournisseurId;
+        existing.PhotoUrl = dto.PhotoUrl ?? existing.PhotoUrl;
+        existing.Notes = dto.Notes ?? existing.Notes;
         existing.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
