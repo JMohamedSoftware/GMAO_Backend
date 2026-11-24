@@ -46,6 +46,27 @@ public class CampagnesController : ControllerBase
             .Where(c => c.SocieteId == societeId)
             .OrderByDescending(c => c.DateDebut)
             .ToListAsync();
+
+        // Si aucune campagne n'existe encore pour cette société (ex: entreprise créée avant ce patch),
+        // créer automatiquement la campagne initiale en cours sans date de fin fixée
+        if (campagnes.Count == 0 && societeId > 0)
+        {
+            var currentYear = DateTime.UtcNow.Year;
+            var initialCampagne = new Campagne
+            {
+                SocieteId = societeId,
+                Nom = $"Campagne {currentYear}",
+                Description = $"Campagne industrielle principale {currentYear}",
+                DateDebut = DateOnly.FromDateTime(DateTime.UtcNow),
+                DateFin = null, // Date de fin ouverte tant que la campagne est en cours
+                Etat = EtatCampagne.EnCours,
+                CreatedAt = DateTime.UtcNow
+            };
+            _context.Campagnes.Add(initialCampagne);
+            await _context.SaveChangesAsync();
+            campagnes.Add(initialCampagne);
+        }
+
         return Ok(campagnes);
     }
 
@@ -84,7 +105,7 @@ public class CampagnesController : ControllerBase
             existing.Description = campagne.Description;
         if (campagne.DateDebut != default)
             existing.DateDebut = campagne.DateDebut;
-        if (campagne.DateFin != default)
+        if (campagne.DateFin != null)
             existing.DateFin = campagne.DateFin;
         if (campagne.Etat != default)
             existing.Etat = campagne.Etat;
@@ -101,6 +122,7 @@ public class CampagnesController : ControllerBase
         if (existing == null) return NotFound();
 
         existing.Etat = EtatCampagne.Terminee;
+        existing.DateFin = DateOnly.FromDateTime(DateTime.UtcNow);
         await _context.SaveChangesAsync();
         return Ok(existing);
     }

@@ -211,6 +211,21 @@ public class SuperAdminController : ControllerBase
         _db.Societes.Add(tenant);
         await _db.SaveChangesAsync();
 
+        // Création automatique de la campagne principale initiale (En cours, sans date de fin fixée)
+        var currentYear = DateTime.UtcNow.Year;
+        var defaultCampagne = new Campagne
+        {
+            SocieteId = tenant.Id,
+            Nom = $"Campagne {currentYear}",
+            Description = $"Campagne industrielle principale {currentYear}",
+            DateDebut = DateOnly.FromDateTime(DateTime.UtcNow),
+            DateFin = null, // Ouverte jusqu'à clôture
+            Etat = EtatCampagne.EnCours,
+            CreatedAt = DateTime.UtcNow
+        };
+        _db.Campagnes.Add(defaultCampagne);
+        await _db.SaveChangesAsync();
+
         // Log audit
         await LogAuditAsync("Création Entreprise", "Tenant", $"Nouvelle entreprise enregistrée: {tenant.Nom} ({tenant.SubscriptionPlan})");
 
@@ -327,6 +342,21 @@ public class SuperAdminController : ControllerBase
                 ParentId = null
             };
             _db.Localisations.Add(defaultLoc);
+            await _db.SaveChangesAsync();
+
+            // Création automatique de la campagne principale initiale (En cours, sans date de fin fixée)
+            var currentYear = DateTime.UtcNow.Year;
+            var defaultCampagne = new Campagne
+            {
+                SocieteId = tenant.Id,
+                Nom = $"Campagne {currentYear}",
+                Description = $"Campagne industrielle principale {currentYear}",
+                DateDebut = DateOnly.FromDateTime(DateTime.UtcNow),
+                DateFin = null, // Ouverte jusqu'à clôture
+                Etat = EtatCampagne.EnCours,
+                CreatedAt = DateTime.UtcNow
+            };
+            _db.Campagnes.Add(defaultCampagne);
             await _db.SaveChangesAsync();
 
             await LogAuditAsync("Création Entreprise", "Tenant", $"Nouvelle entreprise enregistrée: {tenant.Nom} avec compte Admin {adminUser?.Email}");
@@ -1106,7 +1136,7 @@ public class SuperAdminController : ControllerBase
                         c.Nom,
                         c.Description,
                         DateDebut = c.DateDebut.ToString("yyyy-MM-dd"),
-                        DateFin = c.DateFin.ToString("yyyy-MM-dd"),
+                        DateFin = c.DateFin.HasValue ? c.DateFin.Value.ToString("yyyy-MM-dd") : null,
                         Etat = c.Etat.ToString(),
                         c.SocieteId,
                         SocieteNom = s != null ? s.Nom : "Usine Non Assignée",

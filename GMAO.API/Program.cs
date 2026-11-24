@@ -203,6 +203,10 @@ try
                     END;
                 END IF;
 
+                IF EXISTS (SELECT 1 FROM information_schema.columns WHERE LOWER(table_name)='campagnes' AND LOWER(column_name)='datefin' AND is_nullable='NO') THEN
+                    ALTER TABLE ""Campagnes"" ALTER COLUMN ""DateFin"" DROP NOT NULL;
+                END IF;
+
                 BEGIN
                     DROP INDEX IF EXISTS ""IX_Fournisseurs_Code"";
                     CREATE UNIQUE INDEX IF NOT EXISTS ""IX_Fournisseurs_SocieteId_Code"" ON ""Fournisseurs"" (""SocieteId"", ""Code"");
