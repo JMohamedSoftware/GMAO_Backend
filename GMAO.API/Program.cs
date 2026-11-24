@@ -1,8 +1,12 @@
 using System.Text;
+using GMAO.API.Workers;
 using GMAO.Application.Interfaces;
 using GMAO.Application.Services;
+using GMAO.Infrastructure.Audit;
+using GMAO.Infrastructure.Cdc;
 using GMAO.Infrastructure.Data;
 using GMAO.Infrastructure.Services;
+using GMAO.Infrastructure.Storage;
 using GMAO.Domain.Interfaces;
 using GMAO.Infrastructure.Repositories;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -15,15 +19,17 @@ Environment.SetEnvironmentVariable("DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE", "
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ── IHttpContextAccessor (requis pour le Multi-Tenant dans GmaoDbContext) ────
+// ── IHttpContextAccessor & TenantContext (Multi-Tenant Sécurisé) ─────────────
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ITenantContextService, TenantContextService>();
+builder.Services.AddSingleton<AuditSaveChangesInterceptor>();
 
-// ── Base de données PostgreSQL ───────────────────────────────────────────────
-builder.Services.AddDbContext<GmaoDbContext>(options =>
+// ── Base de données PostgreSQL + Audit Trail Interceptor ─────────────────────
+builder.Services.AddDbContext<GmaoDbContext>((sp, options) =>
     options.UseNpgsql(
         builder.Configuration.GetConnectionString("DefaultConnection"),
         npgsqlOptions => npgsqlOptions.MigrationsAssembly("GMAO.Infrastructure")
-    )
+    ).AddInterceptors(sp.GetRequiredService<AuditSaveChangesInterceptor>())
 );
 
 // ── Authentification JWT ─────────────────────────────────────────────────────
@@ -94,6 +100,28 @@ builder.Services.AddCors(options =>
     });
 });
 
+// ── Configuration Storage Supabase & CDC PostgreSQL WAL ──────────────────────
+builder.Services.Configure<SupabaseStorageOptions>(opts =>
+{
+    builder.Configuration.GetSection(SupabaseStorageOptions.SectionName).Bind(opts);
+    // Support des variables d'environnement Render standardisées
+    var envUrl = Environment.GetEnvironmentVariable("SUPABASE_URL");
+    var envKey = Environment.GetEnvironmentVariable("SUPABASE_SERVICE_ROLE_KEY");
+    var envBucket = Environment.GetEnvironmentVariable("SUPABASE_BUCKET_NAME");
+    if (!string.IsNullOrWhiteSpace(envUrl)) opts.Url = envUrl;
+    if (!string.IsNullOrWhiteSpace(envKey)) opts.ServiceRoleKey = envKey;
+    if (!string.IsNullOrWhiteSpace(envBucket)) opts.BucketName = envBucket;
+});
+
+builder.Services.Configure<PostgresCdcOptions>(opts =>
+{
+    builder.Configuration.GetSection(PostgresCdcOptions.SectionName).Bind(opts);
+    var envReplConn = Environment.GetEnvironmentVariable("CDC_REPLICATION_CONNECTION_STRING");
+    var envCdcEnabled = Environment.GetEnvironmentVariable("CDC_ENABLED");
+    if (!string.IsNullOrWhiteSpace(envReplConn)) opts.ReplicationConnectionString = envReplConn;
+    if (bool.TryParse(envCdcEnabled, out bool enabled)) opts.Enabled = enabled;
+});
+
 // ── Repositories & Services DI ────────────────────────────────────────────────
 builder.Services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));
 builder.Services.AddScoped<IUserRepository, UserRepository>();
@@ -105,6 +133,23 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IMaintenanceService, MaintenanceService>();
 builder.Services.AddScoped<IEquipeService, EquipeService>();
 builder.Services.AddScoped<ILocalisationService, LocalisationService>();
+
+// Stockage documentaire hybride (Supabase Storage privé + rétrocompatibilité Local)
+builder.Services.AddHttpClient<SupabaseFileStorageService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(60);
+});
+builder.Services.AddScoped<LocalFileStorageService>(sp => new LocalFileStorageService(
+    sp.GetRequiredService<ILogger<LocalFileStorageService>>(),
+    builder.Environment.WebRootPath));
+builder.Services.AddScoped<HybridFileStorageService>();
+builder.Services.AddScoped<IFileStorageService>(sp => sp.GetRequiredService<HybridFileStorageService>());
+
+// Audit Trail, RedoLogs & Compensation métier contrôlée + Worker CDC WAL
+builder.Services.AddScoped<IBusinessCompensationService, BusinessCompensationService>();
+builder.Services.AddScoped<IRedoLogService, RedoLogService>();
+builder.Services.AddSingleton<PostgresCdcIngestionService>();
+builder.Services.AddHostedService<PostgresCdcBackgroundService>();
 
 builder.Services.AddSwaggerGen(c =>
 {
@@ -127,13 +172,19 @@ app.UseExceptionHandler(errorApp =>
 {
     errorApp.Run(async context =>
     {
-        context.Response.StatusCode = 500;
+        var exceptionHandlerPathFeature = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerPathFeature>();
+        var ex = exceptionHandlerPathFeature?.Error;
+
+        context.Response.StatusCode = ex switch
+        {
+            System.Security.SecurityException => StatusCodes.Status403Forbidden,
+            UnauthorizedAccessException => StatusCodes.Status401Unauthorized,
+            _ => StatusCodes.Status500InternalServerError
+        };
         context.Response.ContentType = "application/json";
         context.Response.Headers["Access-Control-Allow-Origin"] = "*";
         context.Response.Headers["Access-Control-Allow-Headers"] = "*";
         context.Response.Headers["Access-Control-Allow-Methods"] = "*";
-        var exceptionHandlerPathFeature = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerPathFeature>();
-        var ex = exceptionHandlerPathFeature?.Error;
         var msg = ex?.InnerException?.Message ?? ex?.Message ?? "Erreur serveur";
         await context.Response.WriteAsJsonAsync(new { error = msg });
     });

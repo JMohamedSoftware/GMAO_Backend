@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Claims;
 using System.Threading.Tasks;
 using GMAO.Domain.Entities;
 using GMAO.Domain.Interfaces;
@@ -18,10 +19,14 @@ namespace GMAO.API.Controllers;
 public class MaintenanceController : ControllerBase
 {
     private readonly IMaintenanceService _maintenanceService;
+    private readonly ITenantContextService _tenantContext;
 
-    public MaintenanceController(IMaintenanceService maintenanceService)
+    public MaintenanceController(
+        IMaintenanceService maintenanceService,
+        ITenantContextService tenantContext)
     {
         _maintenanceService = maintenanceService;
+        _tenantContext = tenantContext;
     }
 
     private static string FormatFileSize(long bytes)
@@ -33,29 +38,20 @@ public class MaintenanceController : ControllerBase
         return $"{bytes} B";
     }
 
-    private int GetSocieteId(GmaoDbContext context)
+    private int GetSocieteId(GmaoDbContext? context = null) => _tenantContext.GetRequiredTenantId();
+
+    private int GetCurrentUserId()
     {
-        var tenantHeader = Request.Headers["X-Tenant-Id"].FirstOrDefault()?.Trim();
-        if (!string.IsNullOrEmpty(tenantHeader) && tenantHeader != "null" && tenantHeader != "undefined")
-        {
-            if (int.TryParse(tenantHeader, out int tenantId) && tenantId > 0)
-                return tenantId;
-
-            var soc = context.Societes.AsNoTracking().FirstOrDefault(s => s.CodeTenant == tenantHeader);
-            if (soc != null && soc.Id > 0)
-                return soc.Id;
-        }
-
-        var societeIdClaim = User.FindFirst("SocieteId")?.Value;
-        if (int.TryParse(societeIdClaim, out int societeId) && societeId > 0)
-            return societeId;
-
-        return 1;
+        var claim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? User.FindFirst("id")?.Value
+            ?? User.FindFirst("sub")?.Value;
+        return int.TryParse(claim, out int uid) ? uid : 0;
     }
 
     /// <summary>
     /// Fast Aggregated Bootstrap Endpoint.
-    /// Returns essential tenant collections in a single round-trip with .AsNoTracking().
+    /// Returns essential tenant collections in a single round-trip with .AsNoTracking(),
+    /// strictly enforcing RBAC scopes (_ALL, _TEAM, _OWN) on Incidents and WorkOrders.
     /// </summary>
     [HttpGet("bootstrap")]
     [Authorize]
@@ -66,6 +62,20 @@ public class MaintenanceController : ControllerBase
         [FromServices] IUserRepository userRepository)
     {
         int societeId = GetSocieteId(context);
+        int currentUserId = GetCurrentUserId();
+        var isSuperAdmin = User.IsInRole("SuperAdmin");
+        var isAdminOrCompanyAdmin = isSuperAdmin ||
+                                    User.IsInRole("Administrateur") ||
+                                    User.IsInRole("CompanyAdmin");
+
+        int? currentTeamId = null;
+        if (currentUserId > 0)
+        {
+            currentTeamId = await context.Users.AsNoTracking()
+                .Where(u => u.Id == currentUserId && u.SocieteId == societeId)
+                .Select(u => u.EquipeId)
+                .FirstOrDefaultAsync();
+        }
 
         // 1. Equipements (SplitQuery + NoTracking)
         var equipements = await equipementRepository.GetAllWithDetailsAsync(societeId);
@@ -108,32 +118,75 @@ public class MaintenanceController : ControllerBase
         }).ToList();
 
         // 2. Fournisseurs
-        var isSuperAdmin = User.IsInRole("SuperAdmin");
-        var hasTenantHeader = Request.Headers.ContainsKey("X-Tenant-Id");
-        IQueryable<Fournisseur> fourQuery = context.Fournisseurs.AsNoTracking();
-        if (hasTenantHeader || !isSuperAdmin)
-            fourQuery = fourQuery.Where(f => f.SocieteId == societeId);
-        var fournisseurs = await fourQuery.ToListAsync();
+        var fournisseurs = await context.Fournisseurs.AsNoTracking()
+            .Where(f => f.SocieteId == societeId)
+            .ToListAsync();
 
         // 3. Pieces
         var pieces = await context.Pieces.AsNoTracking()
-            .Where(p => p.SocieteId == societeId || (societeId == 1 && (p.SocieteId == null || p.SocieteId == 0)))
+            .Where(p => p.SocieteId == societeId)
             .OrderBy(p => p.Reference)
             .ToListAsync();
 
         // 4. FamillePieces
         var pieceCategories = await context.FamillesPieces.AsNoTracking().ToListAsync();
 
-        // 5. Demandes d'Intervention (Incidents)
-        var incidents = await context.DemandesIntervention.AsNoTracking()
-            .Where(i => i.SocieteId == societeId)
+        // 5. Demandes d'Intervention (Incidents) avec application stricte des scopes RBAC
+        IQueryable<DemandeIntervention> incQuery = context.DemandesIntervention
+            .AsNoTracking()
+            .Where(i => i.SocieteId == societeId);
+
+        bool canViewAllIncidents = isAdminOrCompanyAdmin ||
+                                   User.HasClaim("Permission", "INCIDENTS_VIEW_ALL") ||
+                                   User.HasClaim("Permission", "INCIDENTS_VIEW");
+
+        if (!canViewAllIncidents)
+        {
+            if (User.HasClaim("Permission", "INCIDENTS_VIEW_TEAM"))
+            {
+                incQuery = currentTeamId.HasValue
+                    ? incQuery.Where(i => i.DemandeurId == currentUserId || (i.Demandeur != null && i.Demandeur.EquipeId == currentTeamId.Value))
+                    : incQuery.Where(i => i.DemandeurId == currentUserId);
+            }
+            else
+            {
+                incQuery = incQuery.Where(i => i.DemandeurId == currentUserId);
+            }
+        }
+
+        var incidents = await incQuery
             .OrderByDescending(i => i.CreatedAt)
             .ToListAsync();
 
-        // 6. Ordres de Travail (WorkOrders)
-        var ordres = await context.OrdresTravail.AsNoTracking()
+        // 6. Ordres de Travail (WorkOrders) avec application stricte des scopes RBAC
+        IQueryable<OrdresTravail> otQuery = context.OrdresTravail
+            .AsNoTracking()
             .Include(o => o.Campagne)
-            .Where(o => o.SocieteId == societeId)
+            .Where(o => o.SocieteId == societeId);
+
+        bool canViewAllOts = isAdminOrCompanyAdmin ||
+                             User.HasClaim("Permission", "WORKORDER_VIEW_ALL") ||
+                             User.HasClaim("Permission", "WORKORDER_VIEW");
+
+        if (!canViewAllOts)
+        {
+            if (User.HasClaim("Permission", "WORKORDER_VIEW_TEAM"))
+            {
+                otQuery = currentTeamId.HasValue
+                    ? otQuery.Where(ot =>
+                        ot.TechnicienId == currentUserId ||
+                        ot.ResponsableId == currentUserId ||
+                        (ot.Technicien != null && ot.Technicien.EquipeId == currentTeamId.Value) ||
+                        (ot.Responsable != null && ot.Responsable.EquipeId == currentTeamId.Value))
+                    : otQuery.Where(ot => ot.TechnicienId == currentUserId || ot.ResponsableId == currentUserId);
+            }
+            else
+            {
+                otQuery = otQuery.Where(ot => ot.TechnicienId == currentUserId || ot.ResponsableId == currentUserId);
+            }
+        }
+
+        var ordres = await otQuery
             .OrderByDescending(o => o.DateCreation)
             .ToListAsync();
 
@@ -146,12 +199,10 @@ public class MaintenanceController : ControllerBase
         // 8. Equipes
         var equipes = await equipeService.GetEquipesAsync(societeId);
 
-        // 9. Users
-        var allUsers = await userRepository.GetAllAsync();
-        if (!isSuperAdmin)
-        {
-            allUsers = allUsers.Where(u => u.Role?.Nom != "SuperAdmin" && u.RoleId != 7 && (u.SocieteId == null || u.SocieteId == societeId)).ToList();
-        }
+        // 9. Users (strictement isolés à la société, exclusion absolue de SuperAdmin et comptes orphelins)
+        var allUsers = (await userRepository.GetAllAsync())
+            .Where(u => u.Role?.Nom != "SuperAdmin" && u.RoleId != 7 && u.SocieteId == societeId)
+            .ToList();
 
         // 10. Mouvements de Stock (derniers 200)
         var mouvements = await context.MouvementsStock.AsNoTracking()
@@ -177,9 +228,10 @@ public class MaintenanceController : ControllerBase
     }
 
     [HttpPost("declare-breakdown")]
-    [Authorize] // Simple authentication is enough to report a breakdown usually
+    [Authorize]
     public async Task<IActionResult> DeclareBreakdown([FromQuery] int equipementId, [FromQuery] int demandeurId, [FromBody] string description)
     {
+        var societeId = GetSocieteId();
         var result = await _maintenanceService.DeclareBreakdownAsync(equipementId, demandeurId, description);
         return Ok(result);
     }
@@ -188,6 +240,7 @@ public class MaintenanceController : ControllerBase
     [Authorize(Policy = "WorkOrderCreate")]
     public async Task<IActionResult> CreateOT([FromQuery] int demandId, [FromQuery] int responsableId, [FromQuery] int? technicienId, [FromBody] string description)
     {
+        var societeId = GetSocieteId();
         var result = await _maintenanceService.CreateWorkOrderAsync(demandId, responsableId, technicienId, description);
         return Ok(result);
     }
@@ -196,6 +249,7 @@ public class MaintenanceController : ControllerBase
     [Authorize(Policy = "WorkOrderUpdate")]
     public async Task<IActionResult> CompleteOT([FromQuery] int otId, [FromQuery] string diagnostic, [FromQuery] string solution, [FromQuery] decimal tempsPasse)
     {
+        var societeId = GetSocieteId();
         var result = await _maintenanceService.CompleteWorkOrderAsync(otId, diagnostic, solution, tempsPasse);
         return Ok(result);
     }

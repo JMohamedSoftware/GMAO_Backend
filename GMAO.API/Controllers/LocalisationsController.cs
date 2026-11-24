@@ -14,37 +14,19 @@ namespace GMAO.API.Controllers
     {
         private readonly ILocalisationService _localisationService;
         private readonly GMAO.Infrastructure.Data.GmaoDbContext _context;
+        private readonly ITenantContextService _tenantContext;
 
         public LocalisationsController(
             ILocalisationService localisationService,
-            GMAO.Infrastructure.Data.GmaoDbContext context)
+            GMAO.Infrastructure.Data.GmaoDbContext context,
+            ITenantContextService tenantContext)
         {
             _localisationService = localisationService;
             _context = context;
+            _tenantContext = tenantContext;
         }
 
-        private int? GetTargetSocieteId()
-        {
-            if (Request.Headers.TryGetValue("X-Tenant-Id", out var tenantHeader))
-            {
-                var val = tenantHeader.ToString();
-                if (!string.IsNullOrEmpty(val) && val != "null" && val != "undefined")
-                {
-                    if (int.TryParse(val, out int sid) && sid > 0) return sid;
-                    var soc = _context.Societes.FirstOrDefault(s => s.CodeTenant == val);
-                    if (soc != null) return soc.Id;
-                }
-            }
-
-            var societeIdClaim = User.FindFirst("SocieteId")?.Value;
-            if (int.TryParse(societeIdClaim, out int claimId) && claimId > 0)
-                return claimId;
-
-            if (User.IsInRole("SuperAdmin"))
-                return null;
-
-            return 1;
-        }
+        private int? GetTargetSocieteId() => _tenantContext.CurrentSocieteId;
 
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Localisation>>> GetAll()
@@ -68,6 +50,9 @@ namespace GMAO.API.Controllers
             var localisation = await _localisationService.GetByIdAsync(id);
             if (localisation == null)
                 return NotFound();
+
+            if (!_tenantContext.IsSuperAdmin && localisation.SocieteId != _tenantContext.GetRequiredTenantId())
+                return Forbid();
                 
             return Ok(localisation);
         }
@@ -75,8 +60,7 @@ namespace GMAO.API.Controllers
         [HttpPost]
         public async Task<ActionResult<Localisation>> Create(Localisation localisation)
         {
-            var targetSid = GetTargetSocieteId();
-            localisation.SocieteId = targetSid ?? 1;
+            localisation.SocieteId = _tenantContext.GetRequiredTenantId();
             var created = await _localisationService.CreateAsync(localisation);
             return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
         }
@@ -84,6 +68,12 @@ namespace GMAO.API.Controllers
         [HttpPut("{id}")]
         public async Task<ActionResult<Localisation>> Update(int id, Localisation localisation)
         {
+            var existing = await _localisationService.GetByIdAsync(id);
+            if (existing == null)
+                return NotFound();
+            if (!_tenantContext.IsSuperAdmin && existing.SocieteId != _tenantContext.GetRequiredTenantId())
+                return Forbid();
+
             var updated = await _localisationService.UpdateAsync(id, localisation);
             if (updated == null)
                 return NotFound();
@@ -94,6 +84,12 @@ namespace GMAO.API.Controllers
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(int id)
         {
+            var existing = await _localisationService.GetByIdAsync(id);
+            if (existing == null)
+                return NotFound();
+            if (!_tenantContext.IsSuperAdmin && existing.SocieteId != _tenantContext.GetRequiredTenantId())
+                return Forbid();
+
             var success = await _localisationService.DeleteAsync(id);
             if (!success)
                 return NotFound();

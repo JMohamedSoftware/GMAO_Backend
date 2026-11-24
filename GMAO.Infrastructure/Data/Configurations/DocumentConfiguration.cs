@@ -22,6 +22,26 @@ public class DocumentConfiguration : IEntityTypeConfiguration<Document>
         entity.Property(d => d.MimeType)
               .HasMaxLength(100);
 
+        entity.Property(d => d.StorageProvider)
+              .IsRequired()
+              .HasMaxLength(32)
+              .HasDefaultValue("Local");
+
+        entity.Property(d => d.BucketName)
+              .HasMaxLength(100);
+
+        entity.Property(d => d.Sha256Checksum)
+              .HasMaxLength(64);
+
+        entity.HasIndex(d => d.SocieteId);
+        entity.HasIndex(d => d.StorageProvider);
+
+        // ── Document → Societe (Many-to-One, Nullable pour rétrocompatibilité) ──
+        entity.HasOne(d => d.Societe)
+              .WithMany()
+              .HasForeignKey(d => d.SocieteId)
+              .OnDelete(DeleteBehavior.SetNull);
+
         // ── Document → Equipement (Many-to-One, Nullable) ────────────────────
         entity.HasOne(d => d.Equipement)
               .WithMany(e => e.Documents)
@@ -38,6 +58,12 @@ public class DocumentConfiguration : IEntityTypeConfiguration<Document>
         entity.HasOne(d => d.PlanPreventif)
               .WithMany(p => p.Documents)
               .HasForeignKey(d => d.PlanPreventifId)
+              .OnDelete(DeleteBehavior.SetNull);
+
+        // ── Document → Incident/DemandeIntervention (Many-to-One, Nullable) ──
+        entity.HasOne(d => d.Incident)
+              .WithMany(i => i.Documents)
+              .HasForeignKey(d => d.IncidentId)
               .OnDelete(DeleteBehavior.SetNull);
 
         // ── Document → UploadedBy/User (Many-to-One) ──────────────────────────

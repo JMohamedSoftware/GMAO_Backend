@@ -1,32 +1,28 @@
+using GMAO.Application.Interfaces;
 using GMAO.Domain.Entities;
 using GMAO.Domain.Enums;
-using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
-using System.Security.Claims;
 
 namespace GMAO.Infrastructure.Data;
 
 public class GmaoDbContext : DbContext
 {
+    private readonly ITenantContextService? _tenantContext;
     private readonly int? _currentSocieteId;
     private readonly bool _isSuperAdmin;
+    private readonly bool _isImpersonating;
 
     public GmaoDbContext(
         DbContextOptions<GmaoDbContext> options,
-        IHttpContextAccessor? httpContextAccessor = null) : base(options)
+        ITenantContextService? tenantContext = null) : base(options)
     {
-        var user = httpContextAccessor?.HttpContext?.User;
-        if (user?.Identity?.IsAuthenticated == true)
-        {
-            var roleClaim = user.FindFirst(ClaimTypes.Role)?.Value;
-            _isSuperAdmin = roleClaim == "SuperAdmin";
-
-            var societeIdClaim = user.FindFirst("SocieteId")?.Value;
-            _currentSocieteId = int.TryParse(societeIdClaim, out var sid) && sid > 0 ? sid : null;
-        }
+        _tenantContext = tenantContext;
+        _isSuperAdmin = tenantContext?.IsSuperAdmin ?? false;
+        _isImpersonating = tenantContext?.IsImpersonating ?? false;
+        _currentSocieteId = tenantContext?.CurrentSocieteId;
     }
 
-    // ── Auth & Utilisateurs ─────────────────────────────────────────────────
+    // ── Auth & Utilisateurs ──────────────────────────────────────────────────
     public DbSet<Role> Roles { get; set; }
     public DbSet<RolePermission> RolePermissions { get; set; }
     public DbSet<Societe> Societes { get; set; }
@@ -36,15 +32,15 @@ public class GmaoDbContext : DbContext
     public DbSet<Competence> Competences { get; set; }
     public DbSet<TechnicienCompetence> TechnicienCompetences { get; set; }
 
-    // ── Référentiel ─────────────────────────────────────────────────────────
+    // ── Référentiel ──────────────────────────────────────────────────────────
     public DbSet<Famille> Familles { get; set; }
     public DbSet<Localisation> Localisations { get; set; }
     public DbSet<Fournisseur> Fournisseurs { get; set; }
 
-    // ── Equipements ─────────────────────────────────────────────────────────
+    // ── Equipements ──────────────────────────────────────────────────────────
     public DbSet<Equipement> Equipements { get; set; }
 
-    // ── Interventions ───────────────────────────────────────────────────────
+    // ── Interventions ────────────────────────────────────────────────────────
     public DbSet<DemandeIntervention> DemandesIntervention { get; set; }
     public DbSet<OrdresTravail> OrdresTravail { get; set; }
     public DbSet<Intervention> Interventions { get; set; }
@@ -58,17 +54,20 @@ public class GmaoDbContext : DbContext
     public DbSet<Piece> Pieces { get; set; }
     public DbSet<MouvementStock> MouvementsStock { get; set; }
 
-    // ── Documents & Médias ───────────────────────────────────────────────────
+    // ── Documents ────────────────────────────────────────────────────────────
     public DbSet<Document> Documents { get; set; }
 
     // ── Campagnes ────────────────────────────────────────────────────────────
     public DbSet<Campagne> Campagnes { get; set; }
 
-    // ── Notifications & Audit ────────────────────────────────────────────────
+    // ── Notifications & Audit / CDC ──────────────────────────────────────────
     public DbSet<Notification> Notifications { get; set; }
     public DbSet<Historique> Historiques { get; set; }
+    public DbSet<AuditTrailEntry> AuditTrailEntries { get; set; }
+    public DbSet<CdcEvent> CdcEvents { get; set; }
+    public DbSet<CdcWorkerState> CdcWorkerStates { get; set; }
 
-    // ── SuperAdmin SaaS ───────────────────────────────────────────────────────
+    // ── SuperAdmin SaaS ──────────────────────────────────────────────────────
     public DbSet<SiteUsine> SitesUsines { get; set; }
     public DbSet<PlanOffre> PlansOffres { get; set; }
     public DbSet<Facture> Factures { get; set; }
@@ -82,34 +81,47 @@ public class GmaoDbContext : DbContext
         // Appliquer toutes les configurations depuis le dossier Configurations/
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(GmaoDbContext).Assembly);
 
-        // ── Global Query Filters (Multi-Tenant) ──────────────────────────────
-        // SuperAdmin voit tout. Les autres voient uniquement leur société.
+        // ── Global Query Filters (Multi-Tenant Fail-Closed) ───────────────────
         modelBuilder.Entity<Equipement>()
-            .HasQueryFilter(e => _isSuperAdmin || _currentSocieteId == null || e.SocieteId == _currentSocieteId);
+            .HasQueryFilter(e => (_isSuperAdmin && !_isImpersonating) || e.SocieteId == (_currentSocieteId ?? -1));
 
         modelBuilder.Entity<DemandeIntervention>()
-            .HasQueryFilter(d => _isSuperAdmin || _currentSocieteId == null || d.SocieteId == _currentSocieteId);
+            .HasQueryFilter(d => (_isSuperAdmin && !_isImpersonating) || d.SocieteId == (_currentSocieteId ?? -1));
 
         modelBuilder.Entity<OrdresTravail>()
-            .HasQueryFilter(ot => _isSuperAdmin || _currentSocieteId == null || ot.SocieteId == _currentSocieteId);
+            .HasQueryFilter(ot => (_isSuperAdmin && !_isImpersonating) || ot.SocieteId == (_currentSocieteId ?? -1));
 
         modelBuilder.Entity<Piece>()
-            .HasQueryFilter(p => _isSuperAdmin || _currentSocieteId == null || p.SocieteId == _currentSocieteId);
+            .HasQueryFilter(p => (_isSuperAdmin && !_isImpersonating) || p.SocieteId == (_currentSocieteId ?? -1));
 
         modelBuilder.Entity<Fournisseur>()
-            .HasQueryFilter(f => _isSuperAdmin || _currentSocieteId == null || f.SocieteId == _currentSocieteId);
+            .HasQueryFilter(f => (_isSuperAdmin && !_isImpersonating) || f.SocieteId == (_currentSocieteId ?? -1));
 
         modelBuilder.Entity<Campagne>()
-            .HasQueryFilter(c => _isSuperAdmin || _currentSocieteId == null || c.SocieteId == _currentSocieteId);
+            .HasQueryFilter(c => (_isSuperAdmin && !_isImpersonating) || c.SocieteId == (_currentSocieteId ?? -1));
 
         modelBuilder.Entity<SiteUsine>()
-            .HasQueryFilter(s => _isSuperAdmin || _currentSocieteId == null || s.SocieteId == _currentSocieteId);
+            .HasQueryFilter(s => (_isSuperAdmin && !_isImpersonating) || s.SocieteId == (_currentSocieteId ?? -1));
 
         modelBuilder.Entity<Facture>()
-            .HasQueryFilter(f => _isSuperAdmin || _currentSocieteId == null || f.SocieteId == _currentSocieteId);
+            .HasQueryFilter(f => (_isSuperAdmin && !_isImpersonating) || f.SocieteId == (_currentSocieteId ?? -1));
 
         modelBuilder.Entity<Localisation>()
-            .HasQueryFilter(l => _isSuperAdmin || _currentSocieteId == null || l.SocieteId == _currentSocieteId);
+            .HasQueryFilter(l => (_isSuperAdmin && !_isImpersonating) || l.SocieteId == (_currentSocieteId ?? -1));
+
+        modelBuilder.Entity<Equipe>()
+            .HasQueryFilter(eq => (_isSuperAdmin && !_isImpersonating) || eq.SocieteId == (_currentSocieteId ?? -1));
+
+        modelBuilder.Entity<MouvementStock>()
+            .HasQueryFilter(m => (_isSuperAdmin && !_isImpersonating) || (m.Piece != null && m.Piece.SocieteId == (_currentSocieteId ?? -1)));
+
+        modelBuilder.Entity<Document>()
+            .HasQueryFilter(d => (_isSuperAdmin && !_isImpersonating)
+                || (d.SocieteId != null && d.SocieteId == (_currentSocieteId ?? -1))
+                || (d.SocieteId == null && (
+                    (d.Equipement != null && d.Equipement.SocieteId == (_currentSocieteId ?? -1)) ||
+                    (d.OT != null && d.OT.SocieteId == (_currentSocieteId ?? -1)) ||
+                    (d.Incident != null && d.Incident.SocieteId == (_currentSocieteId ?? -1)))));
 
         // ── Relations Equipe ─────────────────────────────────────────────────
         modelBuilder.Entity<Equipe>()
@@ -132,29 +144,71 @@ public class GmaoDbContext : DbContext
         SeedLocalisations(modelBuilder);
     }
 
-    // ── Auto-inject SocieteId on INSERT ─────────────────────────────────────
-    // When any new entity is saved, if it has a SocieteId property and it's
-    // not set yet (= 0), automatically fill it from the current JWT token.
+    // ── Contrôle et Protection d'Intégrité Multi-Tenant sur SaveChanges ─────
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        ApplyMultiTenantWriteGuards();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        if (_currentSocieteId.HasValue)
+        ApplyMultiTenantWriteGuards();
+        return base.SaveChangesAsync(cancellationToken);
+    }
+
+    private void ApplyMultiTenantWriteGuards()
+    {
+        var isSuperAdmin = _isSuperAdmin;
+        var currentTenantId = _currentSocieteId;
+
+        foreach (var entry in ChangeTracker.Entries())
         {
-            foreach (var entry in ChangeTracker.Entries()
-                .Where(e => e.State == EntityState.Added))
+            // Exclure les journaux/pistes d'audit système de la vérification forcée d'appartenance locataire
+            if (entry.Entity is AuditTrailEntry || entry.Entity is CdcEvent || entry.Entity is CdcWorkerState)
+                continue;
+
+            var prop = entry.Properties.FirstOrDefault(p => p.Metadata.Name == "SocieteId");
+            if (prop == null) continue;
+
+            if (entry.State == EntityState.Added)
             {
-                var prop = entry.Properties.FirstOrDefault(p => p.Metadata.Name == "SocieteId");
-                if (prop != null && (prop.CurrentValue == null || (int)prop.CurrentValue == 0))
+                if (!isSuperAdmin)
                 {
-                    prop.CurrentValue = _currentSocieteId.Value;
+                    if (!currentTenantId.HasValue || currentTenantId.Value <= 0)
+                    {
+                        // RefreshToken / User login peuvent sauvegarder sans SocieteId modifié sur entités sans SocieteId obligatoire
+                        if (prop.Metadata.IsNullable) continue;
+                        throw new InvalidOperationException("Action interdite : contexte locataire (SocieteId) manquant ou non autorisé pour la création d'enregistrements.");
+                    }
+                    // Forcer systématiquement le SocieteId vérifié de l'utilisateur standard
+                    prop.CurrentValue = currentTenantId.Value;
+                }
+                else
+                {
+                    // SuperAdmin : si SocieteId non explicité dans l'entité, appliquer le tenant impersonné si actif
+                    int? existingVal = prop.CurrentValue != null ? Convert.ToInt32(prop.CurrentValue) : null;
+                    if (!existingVal.HasValue || existingVal.Value <= 0)
+                    {
+                        if (currentTenantId.HasValue && currentTenantId.Value > 0)
+                        {
+                            prop.CurrentValue = currentTenantId.Value;
+                        }
+                    }
+                }
+            }
+            else if (entry.State == EntityState.Modified)
+            {
+                if (!isSuperAdmin && prop.IsModified && !Equals(prop.OriginalValue, prop.CurrentValue))
+                {
+                    throw new System.Security.SecurityException("Violation de sécurité : tentative illicite de transfert d'enregistrement inter-tenant.");
                 }
             }
         }
-        return base.SaveChangesAsync(cancellationToken);
     }
 
     private static void SeedLocalisations(ModelBuilder modelBuilder)
     {
-        // 1: Usine (Root)
         modelBuilder.Entity<Localisation>().HasData(
             new Localisation { Id = 1, Nom = "Usine", Description = "Site principal" },
             new Localisation { Id = 2, Nom = "Réception", ParentId = 1 },
@@ -187,33 +241,35 @@ public class GmaoDbContext : DbContext
             new Famille { Id = 3, Nom = "Convoyeurs", Description = "Convoyeurs et tapis transporteurs" },
             new Famille { Id = 4, Nom = "Compresseurs", Description = "Compresseurs d'air et de gaz" },
             new Famille { Id = 5, Nom = "Moteurs Electriques", Description = "Moteurs électriques AC/DC" },
-            new Famille { Id = 6, Nom = "Réfrigération", Description = "Groupes frigorifiques et chambres froides" },
-            new Famille { Id = 7, Nom = "Stérilisateurs", Description = "Autoclaves et tunnels de stérilisation" },
-            new Famille { Id = 8, Nom = "Remplisseuses", Description = "Machines de remplissage et dosage" }
+            new Famille { Id = 6, Nom = "Réfrigération", Description = "Groupes frigorifiques et chambres froides" }
         );
     }
 
     private static void SeedFamillesPieces(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<FamillePiece>().HasData(
-            new FamillePiece { Id = 1, Nom = "Roulements & Paliers" },
-            new FamillePiece { Id = 2, Nom = "Joints & Garnitures" },
-            new FamillePiece { Id = 3, Nom = "Courroies & Chaînes" },
-            new FamillePiece { Id = 4, Nom = "Filtres" },
-            new FamillePiece { Id = 5, Nom = "Lubrifiants & Huiles" },
-            new FamillePiece { Id = 6, Nom = "Composants Electriques" },
-            new FamillePiece { Id = 7, Nom = "Visserie & Boulonnerie" }
+            new FamillePiece { Id = 1, Nom = "Roulements", Description = "Roulements à billes, rouleaux, paliers" },
+            new FamillePiece { Id = 2, Nom = "Vannes", Description = "Vannes papillon, vannes sphériques, clapets" },
+            new FamillePiece { Id = 3, Nom = "Joints", Description = "Joints toriques, joints d'étanchéité, tresses" },
+            new FamillePiece { Id = 4, Nom = "Filtres", Description = "Filtres à huile, filtres à air, tamis" },
+            new FamillePiece { Id = 5, Nom = "Courroies", Description = "Courroies trapézoïdales, crantées" },
+            new FamillePiece { Id = 6, Nom = "Moteurs & Pompes", Description = "Moteurs de rechange, pompes de dosage" },
+            new FamillePiece { Id = 7, Nom = "Capteurs", Description = "Capteurs de température, pression, débit" },
+            new FamillePiece { Id = 8, Nom = "Électricité", Description = "Fusibles, contacteurs, disjoncteurs, relais" }
         );
     }
 
     private static void SeedCompetences(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Competence>().HasData(
-            new Competence { Id = 1, Nom = "Électromécanicien", Description = "Maintenance mécanique et électrique combinée" },
-            new Competence { Id = 2, Nom = "Électricien industriel", Description = "Réseaux électriques, câblage et moteurs" },
-            new Competence { Id = 3, Nom = "Automaticien", Description = "Programmation API Siemens, Schneider, automates et capteurs" },
-            new Competence { Id = 4, Nom = "Soudeur", Description = "Soudure tuyauterie inox et structures métalliques" },
-            new Competence { Id = 5, Nom = "Mécanicien", Description = "Maintenance mécanique lourde, réducteurs, convoyeurs" }
+            new Competence { Id = 1, Nom = "Mécanique", Description = "Maintenance mécanique, démontage/remontage, alignement" },
+            new Competence { Id = 2, Nom = "Électricité", Description = "Dépannage électrique, armoires, moteurs, câblage" },
+            new Competence { Id = 3, Nom = "Automatisme", Description = "Automates programmables (PLC), capteurs, variateurs" },
+            new Competence { Id = 4, Nom = "Pneumatique", Description = "Circuits pneumatiques, vérins, distributeurs" },
+            new Competence { Id = 5, Nom = "Hydraulique", Description = "Centrales hydrauliques, pompes HP, électrovannes" },
+            new Competence { Id = 6, Nom = "Soudure", Description = "Soudure TIG, MIG, arc pour réparation tuyauteries et châssis" },
+            new Competence { Id = 7, Nom = "Froid Industriel", Description = "Groupes frigorifiques, compresseurs à ammoniac/fréon" },
+            new Competence { Id = 8, Nom = "Chaud & Vapeur", Description = "Chaudières vapeur, échangeurs thermiques, réseaux vapeur" }
         );
     }
 }

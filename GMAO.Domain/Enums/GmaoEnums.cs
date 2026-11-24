@@ -60,8 +60,9 @@ public enum StatutOT
     EnCours = 3,
     Suspendu = 4,
     Termine = 5,
-    Annule = 6,
-    AffecteChef = 7
+    Cloture = 6,
+    AffecteChef = 7,
+    Annule = 8
 }
 
 public enum StatutIntervention

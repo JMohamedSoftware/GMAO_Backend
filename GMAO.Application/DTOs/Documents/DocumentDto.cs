@@ -12,5 +12,8 @@ public class DocumentDto
     public string? MimeType { get; set; }
     public int? EquipementId { get; set; }
     public int? OTId { get; set; }
+    public int? IncidentId { get; set; }
+    public string StorageProvider { get; set; } = "Local";
+    public string? Sha256Checksum { get; set; }
     public DateTime CreatedAt { get; set; }
 }

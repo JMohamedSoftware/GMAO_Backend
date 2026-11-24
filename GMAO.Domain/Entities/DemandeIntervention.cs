@@ -21,4 +21,5 @@ public class DemandeIntervention
     public Equipement Equipement { get; set; } = null!;
     public User Demandeur { get; set; } = null!;
     public OrdresTravail? OrdreTravail { get; set; }
+    public ICollection<Document> Documents { get; set; } = new List<Document>();
 }

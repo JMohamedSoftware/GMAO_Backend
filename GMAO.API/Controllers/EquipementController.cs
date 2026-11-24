@@ -10,6 +10,8 @@ using Microsoft.AspNetCore.Authorization;
 using GMAO.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
+using GMAO.Application.Interfaces;
+
 namespace GMAO.API.Controllers;
 
 [ApiController]
@@ -20,36 +22,21 @@ public class EquipementController : ControllerBase
     private readonly IEquipementRepository _equipementRepository;
     private readonly IGenericRepository<Piece> _pieceRepository;
     private readonly GmaoDbContext _context;
+    private readonly ITenantContextService _tenantContext;
 
     public EquipementController(
         IEquipementRepository equipementRepository, 
         IGenericRepository<Piece> pieceRepository,
-        GmaoDbContext context)
+        GmaoDbContext context,
+        ITenantContextService tenantContext)
     {
         _equipementRepository = equipementRepository;
         _pieceRepository = pieceRepository;
         _context = context;
+        _tenantContext = tenantContext;
     }
 
-    private int GetSocieteId()
-    {
-        var tenantHeader = Request.Headers["X-Tenant-Id"].FirstOrDefault()?.Trim();
-        if (!string.IsNullOrEmpty(tenantHeader) && tenantHeader != "null" && tenantHeader != "undefined")
-        {
-            if (int.TryParse(tenantHeader, out int tenantId) && tenantId > 0)
-                return tenantId;
-
-            var soc = _context.Societes.AsNoTracking().FirstOrDefault(s => s.CodeTenant == tenantHeader);
-            if (soc != null && soc.Id > 0)
-                return soc.Id;
-        }
-
-        var societeIdClaim = User.FindFirst("SocieteId")?.Value;
-        if (int.TryParse(societeIdClaim, out int societeId) && societeId > 0)
-            return societeId;
-
-        return 1;
-    }
+    private int GetSocieteId() => _tenantContext.GetRequiredTenantId();
 
     private static string FormatFileSize(long bytes)
     {
@@ -126,7 +113,7 @@ public class EquipementController : ControllerBase
                 .Include(eq => eq.Fournisseur)
                 .Include(eq => eq.Pieces)
                 .Include(eq => eq.Documents)
-                .FirstOrDefaultAsync(eq => eq.Code == id && (eq.SocieteId == societeId || eq.SocieteId == 0 || societeId == 1));
+                .FirstOrDefaultAsync(eq => eq.Code == id && eq.SocieteId == societeId);
         }
 
         if (e == null) return NotFound();
@@ -389,23 +376,13 @@ public class EquipementController : ControllerBase
         if (int.TryParse(id, out int numericId))
         {
             existing = await _context.Equipements.Include(e => e.Famille)
-                .FirstOrDefaultAsync(e => e.Id == numericId && (e.SocieteId == societeId || e.SocieteId == 0 || societeId == 1));
-
-            if (existing == null)
-            {
-                existing = await _context.Equipements.Include(e => e.Famille).FirstOrDefaultAsync(e => e.Id == numericId);
-            }
+                .FirstOrDefaultAsync(e => e.Id == numericId && e.SocieteId == societeId);
         }
 
         if (existing == null)
         {
             existing = await _context.Equipements.Include(e => e.Famille)
-                .FirstOrDefaultAsync(e => e.Code == id && (e.SocieteId == societeId || e.SocieteId == 0 || societeId == 1));
-
-            if (existing == null)
-            {
-                existing = await _context.Equipements.Include(e => e.Famille).FirstOrDefaultAsync(e => e.Code == id);
-            }
+                .FirstOrDefaultAsync(e => e.Code == id && e.SocieteId == societeId);
         }
 
         if (existing == null)
@@ -485,15 +462,15 @@ public class EquipementController : ControllerBase
 
         if (int.TryParse(id, out int numericId))
         {
-            equipement = await _equipementRepository.GetByIdAsync(numericId);
+            equipement = await _context.Equipements.FirstOrDefaultAsync(e => e.Id == numericId && e.SocieteId == societeId);
         }
 
         if (equipement == null)
         {
-            equipement = await _context.Equipements.FirstOrDefaultAsync(e => e.Code == id && (e.SocieteId == societeId || societeId == 1));
+            equipement = await _context.Equipements.FirstOrDefaultAsync(e => e.Code == id && e.SocieteId == societeId);
         }
 
-        if (equipement == null || (equipement.SocieteId != societeId && societeId != 1)) return NotFound();
+        if (equipement == null || equipement.SocieteId != societeId) return NotFound();
         
         await _equipementRepository.DeleteAsync(equipement);
         return NoContent();

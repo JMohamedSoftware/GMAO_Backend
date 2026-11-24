@@ -1,4 +1,6 @@
+using System;
 using System.Linq;
+using System.Security.Claims;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
@@ -6,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using GMAO.Domain.Entities;
 using GMAO.Domain.Interfaces;
 using GMAO.Domain.Enums;
+using GMAO.Application.Interfaces;
 using GMAO.Infrastructure.Data;
 
 namespace GMAO.API.Controllers;
@@ -17,35 +20,69 @@ public class IncidentsController : ControllerBase
 {
     private readonly IGenericRepository<DemandeIntervention> _repository;
     private readonly GmaoDbContext _context;
+    private readonly ITenantContextService _tenantContext;
 
     public IncidentsController(
         IGenericRepository<DemandeIntervention> repository,
-        GmaoDbContext context)
+        GmaoDbContext context,
+        ITenantContextService tenantContext)
     {
         _repository = repository;
         _context = context;
+        _tenantContext = tenantContext;
     }
 
-    private int GetSocieteId()
-    {
-        var tenantHeader = Request.Headers["X-Tenant-Id"].FirstOrDefault();
-        if (int.TryParse(tenantHeader, out int tenantId) && tenantId > 0)
-            return tenantId;
+    private int GetSocieteId() => _tenantContext.GetRequiredTenantId();
 
-        var societeIdClaim = User.FindFirst("SocieteId")?.Value;
-        if (int.TryParse(societeIdClaim, out int societeId) && societeId > 0)
-            return societeId;
-        return 1;
+    private int GetCurrentUserId()
+    {
+        var claim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value 
+            ?? User.FindFirst("id")?.Value 
+            ?? User.FindFirst("sub")?.Value;
+        return int.TryParse(claim, out int uid) ? uid : 0;
     }
 
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
         int societeId = GetSocieteId();
-        var incidents = await _context.DemandesIntervention
+        int currentUserId = GetCurrentUserId();
+
+        var query = _context.DemandesIntervention
             .AsNoTracking()
-            .Where(i => i.SocieteId == societeId)
-            .ToListAsync();
+            .Where(i => i.SocieteId == societeId);
+
+        // RBAC Scoping: SuperAdmin, Admin, CompanyAdmin, or INCIDENTS_VIEW_ALL can see all
+        bool isFullAccess = User.IsInRole("SuperAdmin") || 
+                            User.IsInRole("Administrateur") || 
+                            User.IsInRole("CompanyAdmin") ||
+                            User.HasClaim("Permission", "INCIDENTS_VIEW_ALL") ||
+                            User.HasClaim("Permission", "INCIDENTS_VIEW");
+
+        if (!isFullAccess)
+        {
+            if (User.HasClaim("Permission", "INCIDENTS_VIEW_TEAM"))
+            {
+                var currentUser = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == currentUserId);
+                int? teamId = currentUser?.EquipeId;
+
+                if (teamId.HasValue)
+                {
+                    query = query.Where(i => i.DemandeurId == currentUserId || (i.Demandeur != null && i.Demandeur.EquipeId == teamId.Value));
+                }
+                else
+                {
+                    query = query.Where(i => i.DemandeurId == currentUserId);
+                }
+            }
+            else
+            {
+                // Default / INCIDENTS_VIEW_OWN: only see own requests
+                query = query.Where(i => i.DemandeurId == currentUserId);
+            }
+        }
+
+        var incidents = await query.ToListAsync();
         return Ok(incidents);
     }
 
@@ -53,10 +90,40 @@ public class IncidentsController : ControllerBase
     public async Task<IActionResult> GetById(int id)
     {
         int societeId = GetSocieteId();
+        int currentUserId = GetCurrentUserId();
+
         var incident = await _context.DemandesIntervention
             .AsNoTracking()
+            .Include(i => i.Demandeur)
             .FirstOrDefaultAsync(i => i.Id == id && i.SocieteId == societeId);
+
         if (incident == null) return NotFound();
+
+        // RBAC Scope Check
+        bool isFullAccess = User.IsInRole("SuperAdmin") || 
+                            User.IsInRole("Administrateur") || 
+                            User.IsInRole("CompanyAdmin") ||
+                            User.HasClaim("Permission", "INCIDENTS_VIEW_ALL") ||
+                            User.HasClaim("Permission", "INCIDENTS_VIEW");
+
+        if (!isFullAccess)
+        {
+            if (User.HasClaim("Permission", "INCIDENTS_VIEW_TEAM"))
+            {
+                var currentUser = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == currentUserId);
+                int? teamId = currentUser?.EquipeId;
+                bool inSameTeam = teamId.HasValue && incident.Demandeur != null && incident.Demandeur.EquipeId == teamId.Value;
+                if (incident.DemandeurId != currentUserId && !inSameTeam)
+                {
+                    return Forbid();
+                }
+            }
+            else if (incident.DemandeurId != currentUserId)
+            {
+                return Forbid();
+            }
+        }
+
         return Ok(incident);
     }
 
@@ -69,10 +136,8 @@ public class IncidentsController : ControllerBase
         // Auto-assign authenticated user as Demandeur if not set or <= 0
         if (incident.DemandeurId <= 0)
         {
-            var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value 
-                ?? User.FindFirst("id")?.Value 
-                ?? User.FindFirst("sub")?.Value;
-            if (int.TryParse(userIdClaim, out int currentUserId) && currentUserId > 0)
+            int currentUserId = GetCurrentUserId();
+            if (currentUserId > 0)
             {
                 incident.DemandeurId = currentUserId;
             }
@@ -87,7 +152,7 @@ public class IncidentsController : ControllerBase
             if (eq != null)
             {
                 eq.Etat = EtatEquipement.EnPanne;
-                eq.UpdatedAt = System.DateTime.UtcNow;
+                eq.UpdatedAt = DateTime.UtcNow;
                 await _context.SaveChangesAsync();
             }
         }
@@ -104,13 +169,13 @@ public class IncidentsController : ControllerBase
     {
         if (id != incident.Id) return BadRequest("L'id dans l'URL ne correspond pas au corps.");
 
-        // Load the already-tracked entity from the DB
-        var existing = await _repository.GetByIdAsync(id);
+        int societeId = GetSocieteId();
+        var existing = await _context.DemandesIntervention.FirstOrDefaultAsync(i => i.Id == id && i.SocieteId == societeId);
         if (existing == null) return NotFound();
 
         // Patch only the scalar/value properties — do NOT replace navigation objects
         existing.EquipementId      = incident.EquipementId;
-        existing.DemandeurId       = incident.DemandeurId;
+        existing.DemandeurId       = incident.DemandeurId > 0 ? incident.DemandeurId : existing.DemandeurId;
         existing.DatePanne         = incident.DatePanne;
         existing.Description       = incident.Description;
         existing.Priorite          = incident.Priorite;
@@ -118,18 +183,19 @@ public class IncidentsController : ControllerBase
         existing.PhotoUrl          = incident.PhotoUrl;
         existing.CommentaireRejet  = incident.CommentaireRejet;
 
-        // existing is already tracked, so Update() will pick up changes
-        await _repository.UpdateAsync(existing);
+        await _context.SaveChangesAsync();
         return NoContent();
     }
 
     [HttpDelete("{id}")]
     public async Task<IActionResult> Delete(int id)
     {
-        var incident = await _repository.GetByIdAsync(id);
+        int societeId = GetSocieteId();
+        var incident = await _context.DemandesIntervention.FirstOrDefaultAsync(i => i.Id == id && i.SocieteId == societeId);
         if (incident == null) return NotFound();
         
-        await _repository.DeleteAsync(incident);
+        _context.DemandesIntervention.Remove(incident);
+        await _context.SaveChangesAsync();
         return NoContent();
     }
 }

@@ -1,12 +1,10 @@
-using System.Linq;
-using System.Security.Claims;
-using System.Threading.Tasks;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.EntityFrameworkCore;
+using GMAO.Application.Interfaces;
 using GMAO.Domain.Entities;
 using GMAO.Domain.Enums;
 using GMAO.Infrastructure.Data;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace GMAO.API.Controllers;
 
@@ -16,26 +14,15 @@ namespace GMAO.API.Controllers;
 public class CampagnesController : ControllerBase
 {
     private readonly GmaoDbContext _context;
+    private readonly ITenantContextService _tenantContext;
 
-    public CampagnesController(GmaoDbContext context)
+    public CampagnesController(GmaoDbContext context, ITenantContextService tenantContext)
     {
         _context = context;
+        _tenantContext = tenantContext;
     }
 
-    private int GetSocieteId()
-    {
-        var tenantHeader = Request.Headers["X-Tenant-Id"].FirstOrDefault();
-        if (int.TryParse(tenantHeader, out int tenantId) && tenantId > 0)
-        {
-            return tenantId;
-        }
-
-        var societeIdClaim = User.FindFirst("SocieteId")?.Value;
-        if (int.TryParse(societeIdClaim, out int societeId) && societeId > 0)
-            return societeId;
-
-        return 1;
-    }
+    private int GetSocieteId() => _tenantContext.GetRequiredTenantId();
 
     [HttpGet]
     public async Task<IActionResult> GetAll()

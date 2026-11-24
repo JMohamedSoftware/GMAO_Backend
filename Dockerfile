@@ -9,8 +9,8 @@ COPY GMAO.Application/GMAO.Application.csproj GMAO.Application/
 COPY GMAO.Infrastructure/GMAO.Infrastructure.csproj GMAO.Infrastructure/
 COPY GMAO.API/GMAO.API.csproj GMAO.API/
 
-# Restore dependencies
-RUN dotnet restore
+# Restore API dependencies
+RUN dotnet restore GMAO.API/GMAO.API.csproj
 
 # Copy all source code
 COPY . .

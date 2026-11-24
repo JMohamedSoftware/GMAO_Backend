@@ -1,6 +1,5 @@
-using System.Linq;
-using System.Security.Claims;
 using GMAO.Application.DTOs.Settings;
+using GMAO.Application.Interfaces;
 using GMAO.Domain.Entities;
 using GMAO.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -15,26 +14,15 @@ namespace GMAO.API.Controllers;
 public class SettingsController : ControllerBase
 {
     private readonly GmaoDbContext _context;
+    private readonly ITenantContextService _tenantContext;
 
-    public SettingsController(GmaoDbContext context)
+    public SettingsController(GmaoDbContext context, ITenantContextService tenantContext)
     {
         _context = context;
+        _tenantContext = tenantContext;
     }
 
-    private int GetSocieteId()
-    {
-        var tenantHeader = Request.Headers["X-Tenant-Id"].FirstOrDefault();
-        if (int.TryParse(tenantHeader, out int tenantId) && tenantId > 0)
-        {
-            return tenantId;
-        }
-
-        var societeIdClaim = User.FindFirst("SocieteId")?.Value;
-        if (int.TryParse(societeIdClaim, out int societeId) && societeId > 0)
-            return societeId;
-
-        return 1;
-    }
+    private int GetSocieteId() => _tenantContext.GetRequiredTenantId();
 
     [HttpGet("Roles")]
     public async Task<ActionResult<List<RoleDto>>> GetRoles()

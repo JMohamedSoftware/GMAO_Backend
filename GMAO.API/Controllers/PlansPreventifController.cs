@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using GMAO.Domain.Entities;
 using GMAO.Domain.Enums;
 using GMAO.Domain.Interfaces;
+using GMAO.Application.Interfaces;
 using Microsoft.EntityFrameworkCore;
 using GMAO.Infrastructure.Data;
 using System.Security.Claims;
@@ -16,11 +17,16 @@ public class PlansPreventifController : ControllerBase
 {
     private readonly GmaoDbContext _context;
     private readonly IGenericRepository<OrdresTravail> _otRepository;
+    private readonly ITenantContextService _tenantContext;
 
-    public PlansPreventifController(GmaoDbContext context, IGenericRepository<OrdresTravail> otRepository)
+    public PlansPreventifController(
+        GmaoDbContext context, 
+        IGenericRepository<OrdresTravail> otRepository,
+        ITenantContextService tenantContext)
     {
         _context = context;
         _otRepository = otRepository;
+        _tenantContext = tenantContext;
     }
 
     private static DateTime? ToUtc(DateTime? d)
@@ -112,6 +118,10 @@ public class PlansPreventifController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreatePlanRequest req)
     {
+        var tenantId = _tenantContext.GetRequiredTenantId();
+        var eqExists = await _context.Equipements.AnyAsync(e => e.Id == req.EquipementId && e.SocieteId == tenantId);
+        if (!eqExists) return BadRequest("L'équipement spécifié n'existe pas ou n'appartient pas à votre société.");
+
         var plan = new PlanPreventif
         {
             EquipementId      = req.EquipementId,
@@ -231,7 +241,11 @@ public class PlansPreventifController : ControllerBase
             : $"Fréquence: tous les {plan.Frequence} {plan.UniteMesure}";
 
         // Déterminer la société
-        int targetSocieteId = int.TryParse(User.FindFirst("SocieteId")?.Value, out int sId) && sId > 0 ? sId : (plan.Equipement?.SocieteId ?? 1);
+        int targetSocieteId = _tenantContext.GetRequiredTenantId();
+        if (plan.Equipement != null && plan.Equipement.SocieteId != targetSocieteId && !User.IsInRole("SuperAdmin"))
+        {
+            return Forbid();
+        }
         int currentYear = now.Year;
         string yearPrefix = $"OT-{currentYear}-";
 

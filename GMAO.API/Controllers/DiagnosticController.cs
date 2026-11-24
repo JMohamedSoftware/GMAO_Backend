@@ -9,7 +9,7 @@ namespace GMAO.API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[AllowAnonymous]
+[Authorize(Roles = "SuperAdmin")]
 public class DiagnosticController : ControllerBase
 {
     private readonly GmaoDbContext _db;

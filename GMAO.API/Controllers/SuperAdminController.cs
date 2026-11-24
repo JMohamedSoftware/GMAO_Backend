@@ -7,6 +7,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using GMAO.Domain.Entities;
 using GMAO.Domain.Enums;
+using System.Security.Claims;
+using GMAO.Application.Interfaces;
 using GMAO.Infrastructure.Data;
 using GMAO.Application.Services;
 
@@ -14,13 +16,21 @@ namespace GMAO.API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize(Roles = "SuperAdmin")]
 public class SuperAdminController : ControllerBase
 {
     private readonly GmaoDbContext _db;
+    private readonly IRedoLogService _redoLogService;
+    private readonly IBusinessCompensationService _compensationService;
 
-    public SuperAdminController(GmaoDbContext db)
+    public SuperAdminController(
+        GmaoDbContext db,
+        IRedoLogService redoLogService,
+        IBusinessCompensationService compensationService)
     {
         _db = db;
+        _redoLogService = redoLogService;
+        _compensationService = compensationService;
     }
 
     // ───────────────────────────────────────────────────────────────────────────
@@ -1151,306 +1161,101 @@ public class SuperAdminController : ControllerBase
     }
 
     // ───────────────────────────────────────────────────────────────────────────
-    // 9.2 REDO LOGS & ROLLBACK (AUDIT MUTATIONS WAL POSTGRESQL & CDC ENGINE)
+    // 9.2 REDO LOGS (POSTGRESQL WAL / CDC + AUDIT TRAIL APPLICATIF RÉEL)
     // ───────────────────────────────────────────────────────────────────────────
+    [HttpGet("redologs/overview")]
+    public async Task<IActionResult> GetRedoLogsOverview()
+    {
+        var overview = await _redoLogService.GetOverviewAsync(HttpContext.RequestAborted);
+        return Ok(overview);
+    }
+
     [HttpGet("redologs")]
     public async Task<IActionResult> GetRedoLogs(
-        [FromQuery] int? societeId,
-        [FromQuery] string? campagneNom,
-        [FromQuery] string? authorName,
-        [FromQuery] string? actionType,
-        [FromQuery] string? entityType)
+        [FromQuery] string source = "ALL",
+        [FromQuery] DateTime? fromDate = null,
+        [FromQuery] DateTime? toDate = null,
+        [FromQuery] int? societeId = null,
+        [FromQuery] string? tableName = null,
+        [FromQuery] string? operation = null,
+        [FromQuery] int? userId = null,
+        [FromQuery] string? userSearch = null,
+        [FromQuery] string? transactionId = null,
+        [FromQuery] string? search = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 25)
     {
-        await EnsureSeedDataAsync();
-        var societes = await _db.Societes.IgnoreQueryFilters().ToListAsync();
-        var now = DateTime.UtcNow;
-
-        var redoList = new List<RedoLogEntryDto>();
-
-        // 1. DDL OPERATIONS (ALTER - Schema mutations captured from PostgreSQL WAL / Logical Replication)
-        redoList.Add(new RedoLogEntryDto
+        var query = new RedoLogQueryParams
         {
-            Id = "TX-DDL-101",
-            Timestamp = now.AddMinutes(-5).ToString("yyyy-MM-dd HH:mm:ss"),
-            TenantId = societes.FirstOrDefault()?.Id ?? 1,
-            TenantName = societes.FirstOrDefault()?.Nom ?? "Plateforme Centrale",
-            CampagneNom = "Campagne Tomates 2026",
-            AuthorName = "SuperAdmin DBA",
-            AuthorRole = "Administrateur Base de Données",
-            AuthorAvatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
-            EntityType = "Schéma & Tables",
-            EntityId = "TBL-OT",
-            EntityName = "Table OrdresTravail (PostgreSQL WAL)",
-            ActionType = "ALTER",
-            FieldName = "Ajout Colonne Consigne Température",
-            OldValue = "Structure antérieure: Colonne inexistante",
-            NewValue = "ALTER TABLE \"OrdresTravail\" ADD COLUMN \"ConsigneTemperature\" NUMERIC(5,2) DEFAULT 85.0",
-            IsRollbacked = false,
-            CanRollback = true
-        });
+            Source = source,
+            FromDate = fromDate,
+            ToDate = toDate,
+            SocieteId = societeId,
+            TableName = tableName,
+            Operation = operation,
+            UserId = userId,
+            UserSearch = userSearch,
+            TransactionId = transactionId,
+            Search = search,
+            Page = page,
+            PageSize = pageSize
+        };
 
-        redoList.Add(new RedoLogEntryDto
-        {
-            Id = "TX-DDL-102",
-            Timestamp = now.AddMinutes(-32).ToString("yyyy-MM-dd HH:mm:ss"),
-            TenantId = societes.Skip(1).FirstOrDefault()?.Id ?? 2,
-            TenantName = societes.Skip(1).FirstOrDefault()?.Nom ?? "Conserverie Carthage SARL",
-            CampagneNom = "Campagne Tomates 2026",
-            AuthorName = "SuperAdmin DBA",
-            AuthorRole = "Administrateur Base de Données",
-            AuthorAvatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
-            EntityType = "Schéma & Tables",
-            EntityId = "TBL-EQ",
-            EntityName = "Table Equipements (PostgreSQL WAL)",
-            ActionType = "ALTER",
-            FieldName = "Indexation Haute Performance Ligne",
-            OldValue = "Index: Scan séquentiel standard",
-            NewValue = "CREATE INDEX \"idx_equip_societe_statut\" ON \"Equipements\"(\"SocieteId\", \"Statut\")",
-            IsRollbacked = false,
-            CanRollback = true
-        });
+        var result = await _redoLogService.QueryLogsAsync(query, HttpContext.RequestAborted);
+        return Ok(result);
+    }
 
-        redoList.Add(new RedoLogEntryDto
-        {
-            Id = "TX-DDL-103",
-            Timestamp = now.AddHours(-1).AddMinutes(-10).ToString("yyyy-MM-dd HH:mm:ss"),
-            TenantId = societes.FirstOrDefault()?.Id ?? 1,
-            TenantName = societes.FirstOrDefault()?.Nom ?? "Plateforme Centrale",
-            CampagneNom = "Hors-campagne",
-            AuthorName = "Système Migration EF Core",
-            AuthorRole = "PostgreSQL Migration Runner",
-            AuthorAvatar = "https://images.unsplash.com/photo-1568602471122-7832951cc4c5?w=150",
-            EntityType = "Schéma & Tables",
-            EntityId = "TBL-SOC",
-            EntityName = "Table Societes (PostgreSQL WAL)",
-            ActionType = "ALTER",
-            FieldName = "Modification Contrainte Quota Stockage",
-            OldValue = "DEFAULT max_storage_gb = 50.0",
-            NewValue = "ALTER TABLE \"Societes\" ALTER COLUMN \"MaxStorageGb\" SET DEFAULT 100.0",
-            IsRollbacked = false,
-            CanRollback = true
-        });
+    [HttpPost("audit-trail/{auditEntryId:long}/compensate")]
+    [HttpPost("redologs/{auditEntryId:long}/compensate")]
+    public async Task<IActionResult> CompensateAuditEntry(long auditEntryId)
+    {
+        var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
+        int superAdminId = int.TryParse(userIdStr, out int uid) ? uid : 0;
+        var superAdminName = User.FindFirstValue("name") ?? User.FindFirstValue(ClaimTypes.Email) ?? "SuperAdmin";
 
-        redoList.Add(new RedoLogEntryDto
-        {
-            Id = "TX-DDL-104",
-            Timestamp = now.AddHours(-2).AddMinutes(-45).ToString("yyyy-MM-dd HH:mm:ss"),
-            TenantId = societes.FirstOrDefault()?.Id ?? 1,
-            TenantName = societes.FirstOrDefault()?.Nom ?? "Plateforme Centrale",
-            CampagneNom = "Campagne Tomates 2025",
-            AuthorName = "SecOps Platform",
-            AuthorRole = "Administrateur Sécurité Cloud",
-            AuthorAvatar = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150",
-            EntityType = "Schéma & Tables",
-            EntityId = "SEC-RLS",
-            EntityName = "Politique RLS Campagnes (PostgreSQL WAL)",
-            ActionType = "ALTER",
-            FieldName = "Activation Row Level Security Multi-Tenants",
-            OldValue = "ALTER TABLE \"Campagnes\" DISABLE ROW LEVEL SECURITY",
-            NewValue = "ALTER TABLE \"Campagnes\" ENABLE ROW LEVEL SECURITY",
-            IsRollbacked = false,
-            CanRollback = true
-        });
-
-        // 2. DML TRANSACTIONS (CRUD) ASSIGNED TO REALISTIC TENANTS & REAL CAMPAIGNS
-        foreach (var s in societes.Take(10))
-        {
-            var sId = s.Id;
-            var sNom = s.Nom;
-            var isHuilerie = sNom.ToLower().Contains("huilerie") || sNom.ToLower().Contains("sahel");
-            var isBeverage = sNom.ToLower().Contains("boissons") || sNom.ToLower().Contains("sfbt");
-            var camp2026 = isHuilerie ? "Campagne Oléicole 2025/2026" : (isBeverage ? "Campagne Haute Saison Boissons 2026" : "Campagne Tomates 2026");
-            var camp2025 = isHuilerie ? "Campagne Oléicole 2024/2025" : (isBeverage ? "Campagne Jus & Agrumes 2025" : "Campagne Tomates 2025");
-
-            // Mutation 1: UPDATE Statut Équipement sous Campagne Active
-            redoList.Add(new RedoLogEntryDto
-            {
-                Id = $"TX-{sId}01",
-                Timestamp = now.AddMinutes(-(sId * 7 + 12)).ToString("yyyy-MM-dd HH:mm:ss"),
-                TenantId = sId,
-                TenantName = sNom,
-                CampagneNom = camp2026,
-                AuthorName = "Karim Ben Salah",
-                AuthorRole = "Technicien Électromécanicien",
-                AuthorAvatar = "https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=150",
-                EntityType = "Équipement",
-                EntityId = $"EQ-{sId}02",
-                EntityName = isHuilerie ? "Séparateur Centrifuge Huile N°1" : (isBeverage ? "Soutireuse Isobare 60 Becs" : "Groupe Évaporateur Concentrateur N°1"),
-                ActionType = "UPDATE",
-                FieldName = "Statut & Santé",
-                OldValue = "Statut: 'En panne' • Indice santé: 32%",
-                NewValue = "Statut: 'Opérationnel' • Indice santé: 94%",
-                IsRollbacked = false,
-                CanRollback = true
-            });
-
-            // Mutation 2: UPDATE OT Priorité sous Campagne Active
-            redoList.Add(new RedoLogEntryDto
-            {
-                Id = $"TX-{sId}02",
-                Timestamp = now.AddMinutes(-(sId * 15 + 38)).ToString("yyyy-MM-dd HH:mm:ss"),
-                TenantId = sId,
-                TenantName = sNom,
-                CampagneNom = camp2026,
-                AuthorName = s.ManagerNom ?? "Sami Mansouri",
-                AuthorRole = "Responsable Maintenance Usine",
-                AuthorAvatar = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150",
-                EntityType = "Ordre de Travail",
-                EntityId = $"OT-2026-{sId}04",
-                EntityName = isHuilerie ? "Changement filtres presse continue" : (isBeverage ? "Remplacement membranes pasteurisateur" : "Remplacement garniture mécanique pompe pâteuse"),
-                ActionType = "UPDATE",
-                FieldName = "Priorité & Technicien Assigné",
-                OldValue = "Priorité: 'Moyenne' • Assigné: 'Non assigné'",
-                NewValue = "Priorité: 'Critique' • Assigné: 'Karim Ben Salah'",
-                IsRollbacked = false,
-                CanRollback = true
-            });
-
-            // Mutation 3: CREATE Incident sous Campagne Active
-            redoList.Add(new RedoLogEntryDto
-            {
-                Id = $"TX-{sId}03",
-                Timestamp = now.AddHours(-1).AddMinutes(-(sId * 10)).ToString("yyyy-MM-dd HH:mm:ss"),
-                TenantId = sId,
-                TenantName = sNom,
-                CampagneNom = camp2026,
-                AuthorName = "Mohamed Ben Amor",
-                AuthorRole = "Opérateur Ligne Principale",
-                AuthorAvatar = "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150",
-                EntityType = "Incident",
-                EntityId = $"INC-2026-{sId}91",
-                EntityName = isHuilerie ? "Élévation anormale température malaxeur" : (isBeverage ? "Défaut pression CO2 sur ligne soutirage" : "Vibration anormale sur palier moteur broyeur"),
-                ActionType = "CREATE",
-                FieldName = "Déclaration Panne Haute Saison",
-                OldValue = "N/A (Nouvel Incident)",
-                NewValue = "Incident déclaré avec urgence Haute sur ligne de transformation",
-                IsRollbacked = false,
-                CanRollback = true
-            });
-
-            // Mutation 4: UPDATE Stock sous Campagne Active
-            redoList.Add(new RedoLogEntryDto
-            {
-                Id = $"TX-{sId}04",
-                Timestamp = now.AddHours(-2).AddMinutes(-(sId * 8)).ToString("yyyy-MM-dd HH:mm:ss"),
-                TenantId = sId,
-                TenantName = sNom,
-                CampagneNom = camp2026,
-                AuthorName = "Leila Farhat",
-                AuthorRole = "Magasinière Centrale PDR",
-                AuthorAvatar = "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150",
-                EntityType = "Pièce de Stock",
-                EntityId = $"PR-ROUL-620{sId}",
-                EntityName = "Roulement SKF 6204-2RSH haute température",
-                ActionType = "UPDATE",
-                FieldName = "Stock Physique",
-                OldValue = "Quantité en stock: 14 pièces",
-                NewValue = "Quantité en stock: 2 pièces (Alerte seuil de sécurité)",
-                IsRollbacked = false,
-                CanRollback = true
-            });
-
-            // Mutation 5: DELETE Tâche sous Campagne 2025 Clôturée
-            redoList.Add(new RedoLogEntryDto
-            {
-                Id = $"TX-{sId}05",
-                Timestamp = now.AddHours(-3).AddMinutes(-(sId * 12)).ToString("yyyy-MM-dd HH:mm:ss"),
-                TenantId = sId,
-                TenantName = sNom,
-                CampagneNom = camp2025,
-                AuthorName = "Khaled Ammar",
-                AuthorRole = "Chef d'Équipe Ligne",
-                AuthorAvatar = "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150",
-                EntityType = "Tâche Préventive",
-                EntityId = $"TP-{sId}08",
-                EntityName = "Contrôle hebdomadaire vanne bypass manuelle",
-                ActionType = "DELETE",
-                FieldName = "Suppression Enregistrement",
-                OldValue = "Tâche active: 'Contrôle vanne bypass' (Fréquence 7j)",
-                NewValue = "Entrée purgée lors du bilan technique annuel clôturé",
-                IsRollbacked = false,
-                CanRollback = true
-            });
-
-            // Mutation 6: UPDATE Bilan Clôture Campagne 2025
-            redoList.Add(new RedoLogEntryDto
-            {
-                Id = $"TX-{sId}06",
-                Timestamp = now.AddHours(-5).ToString("yyyy-MM-dd HH:mm:ss"),
-                TenantId = sId,
-                TenantName = sNom,
-                CampagneNom = camp2025,
-                AuthorName = s.ManagerNom ?? "Sonia Trabelsi",
-                AuthorRole = "Responsable Production Usine",
-                AuthorAvatar = "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150",
-                EntityType = "Campagne",
-                EntityId = $"CMP-2025-{sId}",
-                EntityName = camp2025,
-                ActionType = "UPDATE",
-                FieldName = "Statut Clôture Campagne",
-                OldValue = "Statut: 'En cours de production'",
-                NewValue = "Statut: 'Clôturée & Verrouillée en archive'",
-                IsRollbacked = false,
-                CanRollback = true
-            });
-        }
-
-        // Apply filters
-        var filtered = redoList.AsEnumerable();
-
-        if (societeId.HasValue && societeId.Value > 0)
-        {
-            filtered = filtered.Where(r => r.TenantId == societeId.Value);
-        }
-
-        if (!string.IsNullOrWhiteSpace(campagneNom) && campagneNom != "ALL")
-        {
-            filtered = filtered.Where(r => r.CampagneNom.Equals(campagneNom, StringComparison.OrdinalIgnoreCase));
-        }
-
-        if (!string.IsNullOrWhiteSpace(authorName) && authorName != "ALL")
-        {
-            filtered = filtered.Where(r => r.AuthorName.Equals(authorName, StringComparison.OrdinalIgnoreCase));
-        }
-
-        if (!string.IsNullOrWhiteSpace(actionType) && actionType != "ALL")
-        {
-            filtered = filtered.Where(r => r.ActionType.Equals(actionType, StringComparison.OrdinalIgnoreCase));
-        }
-
-        if (!string.IsNullOrWhiteSpace(entityType) && entityType != "ALL")
-        {
-            filtered = filtered.Where(r => r.EntityType.Equals(entityType, StringComparison.OrdinalIgnoreCase));
-        }
-
-        return Ok(filtered.OrderByDescending(r => r.Timestamp).ToList());
+        var result = await _compensationService.CompensateAsync(auditEntryId, superAdminId, superAdminName, HttpContext.RequestAborted);
+        return StatusCode(result.HttpStatusCode, result);
     }
 
     [HttpPost("redologs/{id}/rollback")]
     public async Task<IActionResult> RollbackRedoLog(string id)
     {
-        // Enregistrement d'un log de sécurité SuperAdmin pour tracer le rollback
-        var rollbackLog = new JournalSuperAdmin
+        // Route historique sécurisée : accepte uniquement un identifiant numérique d'Audit Trail (ou préfixé AUD-)
+        // et délègue vers le moteur d'annulation métier contrôlée. Refuse toute illusion de "rewind WAL".
+        var cleanId = id.StartsWith("AUD-", StringComparison.OrdinalIgnoreCase) ? id[4..] : id;
+        if (!long.TryParse(cleanId, out long numericAuditId))
         {
-            DateHeure = DateTime.UtcNow,
-            Niveau = "WARNING",
-            Action = "Rollback Transaction",
-            Categorie = "Gouvernance Données",
-            UserNom = "Super Administrateur",
-            UserRole = "SuperAdmin",
-            SocieteNom = "Audit Global",
-            Details = $"Exécution réussie du Rollback sur la transaction {id}. Rétablissement immédiat de l'ancienne valeur.",
-            Statut = "Succès"
-        };
-        _db.JournauxSuperAdmin.Add(rollbackLog);
-        await _db.SaveChangesAsync();
+            return BadRequest(new
+            {
+                success = false,
+                message = "Opération refusée : PostgreSQL WAL n'autorise pas l'inversion arbitraire d'un événement physique ou d'une opération DDL. Utilisez une action compensatoire métier contrôlée sur une entrée Audit Trail éligible, ou la procédure PITR Supabase en environnement isolé."
+            });
+        }
 
+        return await CompensateAuditEntry(numericAuditId);
+    }
+
+    [HttpGet("redologs/pitr-capabilities")]
+    public IActionResult GetPitrCapabilities()
+    {
         return Ok(new
         {
-            success = true,
-            transactionId = id,
-            message = $"Rollback de la transaction {id} exécuté avec succès. L'enregistrement a été restauré à sa valeur antérieure.",
-            timestamp = DateTime.UtcNow
+            provider = "Supabase PostgreSQL Managed",
+            projectRef = "rbolwywlpzidkbrczcww",
+            walSemantics = "Le Write-Ahead Log (WAL) garantit la durabilité ACID et la récupération après crash / PITR. Il ne constitue pas un bouton d'annulation transactionnelle unitaire après COMMIT.",
+            plans = new[]
+            {
+                new { plan = "Free", autoBackups = "Aucun", pitr = "Indisponible", notes = "Export manuel pg_dump / supabase db dump requis. Pause après 7 jours d'inactivité." },
+                new { plan = "Pro", autoBackups = "Quotidien physique (rétention 7 jours)", pitr = "Option payante (archivage WAL continu)", notes = "La restauration PITR remplace les backups quotidiens et offre un RPO d'environ 2 minutes." }
+            },
+            isolationProcedure = new[]
+            {
+                "1. Identifier l'horodatage UTC exact précédant l'incident via l'Audit Trail applicatif.",
+                "2. Déclencher la restauration PITR Supabase vers un projet/clone isolé (staging) — ne jamais restaurer directement sur la production sans vérification.",
+                "3. Vérifier l'intégrité des tables multi-tenants (Societes, Equipements, OrdresTravail, Documents).",
+                "4. Réconcilier les métadonnées Document avec le bucket privé Supabase Storage 'gmao-documents' (les backups Postgres ne sauvegardent pas les blobs Storage).",
+                "5. Basculer ou réimporter sélectivement après validation technique."
+            }
         });
     }
 
@@ -2467,27 +2272,6 @@ public class TenantLimitsDto
     public int? MaxEquipements { get; set; }
     public double? MaxStorageGb { get; set; }
     public int? AddedCredits { get; set; }
-}
-
-public class RedoLogEntryDto
-{
-    public string Id { get; set; } = string.Empty;
-    public string Timestamp { get; set; } = string.Empty;
-    public int TenantId { get; set; }
-    public string TenantName { get; set; } = string.Empty;
-    public string CampagneNom { get; set; } = string.Empty;
-    public string AuthorName { get; set; } = string.Empty;
-    public string AuthorRole { get; set; } = string.Empty;
-    public string? AuthorAvatar { get; set; }
-    public string EntityType { get; set; } = string.Empty;
-    public string EntityId { get; set; } = string.Empty;
-    public string EntityName { get; set; } = string.Empty;
-    public string ActionType { get; set; } = string.Empty; // "ALTER", "UPDATE", "CREATE", "DELETE", "ROLLBACK"
-    public string FieldName { get; set; } = string.Empty;
-    public string OldValue { get; set; } = string.Empty;
-    public string NewValue { get; set; } = string.Empty;
-    public bool IsRollbacked { get; set; }
-    public bool CanRollback { get; set; } = true;
 }
 
 // ───────────────────────────────────────────────────────────────────────────

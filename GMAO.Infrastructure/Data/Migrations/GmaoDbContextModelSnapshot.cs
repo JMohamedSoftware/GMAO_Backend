@@ -37,6 +37,109 @@ namespace GMAO.Infrastructure.Data.Migrations
                     b.ToTable("EquipementPiece");
                 });
 
+            modelBuilder.Entity("GMAO.Domain.Entities.AuditTrailEntry", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("BusinessActionLabel")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ChangedProperties")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("CompensatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("CompensatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<long?>("CompensatedEntryId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("CorrelationId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("EntityId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("EntityName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("IpAddress")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<bool>("IsCompensated")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("NewValuesJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("OldValuesJson")
+                        .HasColumnType("text");
+
+                    b.Property<int?>("SocieteId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SocieteName")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("TimestampUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TransactionId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UserName")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<string>("UserRole")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EntityName");
+
+                    b.HasIndex("SocieteId");
+
+                    b.HasIndex("TimestampUtc");
+
+                    b.HasIndex("TransactionId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("AuditTrailEntries", (string)null);
+                });
+
             modelBuilder.Entity("GMAO.Domain.Entities.Campagne", b =>
                 {
                     b.Property<int>("Id")
@@ -51,7 +154,7 @@ namespace GMAO.Infrastructure.Data.Migrations
                     b.Property<DateOnly>("DateDebut")
                         .HasColumnType("date");
 
-                    b.Property<DateOnly>("DateFin")
+                    b.Property<DateOnly?>("DateFin")
                         .HasColumnType("date");
 
                     b.Property<string>("Description")
@@ -72,6 +175,171 @@ namespace GMAO.Infrastructure.Data.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Campagnes", (string)null);
+                });
+
+            modelBuilder.Entity("GMAO.Domain.Entities.CdcEvent", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CommitTimestampUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Lsn")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("NewValuesJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("OldValuesJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Operation")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("PublicationName")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime>("ReceivedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RecordId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("SchemaName")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("SlotName")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<int?>("SocieteId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("TableName")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("TransactionId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CommitTimestampUtc");
+
+                    b.HasIndex("SocieteId");
+
+                    b.HasIndex("TableName");
+
+                    b.HasIndex("TransactionId");
+
+                    b.HasIndex("Lsn", "TableName", "Operation", "RecordId")
+                        .IsUnique();
+
+                    b.ToTable("CdcEvents", (string)null);
+                });
+
+            modelBuilder.Entity("GMAO.Domain.Entities.CdcWorkerState", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("CurrentServerWalLsn")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("LastConsumedLsn")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("LastEventAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("LastHeartbeatUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("MaxReplicationSlots")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("MaxWalSenders")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PostgresVersion")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("PublicationName")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<long?>("ReplicationLagBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("RetainedWalBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool?>("SlotActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("SlotName")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("StatusReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<long>("TotalEventsProcessed")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("WalLevel")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("WalStatus")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SlotName")
+                        .IsUnique();
+
+                    b.ToTable("CdcWorkerStates", (string)null);
                 });
 
             modelBuilder.Entity("GMAO.Domain.Entities.Competence", b =>
@@ -102,32 +370,50 @@ namespace GMAO.Infrastructure.Data.Migrations
                         new
                         {
                             Id = 1,
-                            Description = "Maintenance mécanique et électrique combinée",
-                            Nom = "Électromécanicien"
+                            Description = "Maintenance mécanique, démontage/remontage, alignement",
+                            Nom = "Mécanique"
                         },
                         new
                         {
                             Id = 2,
-                            Description = "Réseaux électriques, câblage et moteurs",
-                            Nom = "Électricien industriel"
+                            Description = "Dépannage électrique, armoires, moteurs, câblage",
+                            Nom = "Électricité"
                         },
                         new
                         {
                             Id = 3,
-                            Description = "Programmation API Siemens, Schneider, automates et capteurs",
-                            Nom = "Automaticien"
+                            Description = "Automates programmables (PLC), capteurs, variateurs",
+                            Nom = "Automatisme"
                         },
                         new
                         {
                             Id = 4,
-                            Description = "Soudure tuyauterie inox et structures métalliques",
-                            Nom = "Soudeur"
+                            Description = "Circuits pneumatiques, vérins, distributeurs",
+                            Nom = "Pneumatique"
                         },
                         new
                         {
                             Id = 5,
-                            Description = "Maintenance mécanique lourde, réducteurs, convoyeurs",
-                            Nom = "Mécanicien"
+                            Description = "Centrales hydrauliques, pompes HP, électrovannes",
+                            Nom = "Hydraulique"
+                        },
+                        new
+                        {
+                            Id = 6,
+                            Description = "Soudure TIG, MIG, arc pour réparation tuyauteries et châssis",
+                            Nom = "Soudure"
+                        },
+                        new
+                        {
+                            Id = 7,
+                            Description = "Groupes frigorifiques, compresseurs à ammoniac/fréon",
+                            Nom = "Froid Industriel"
+                        },
+                        new
+                        {
+                            Id = 8,
+                            Description = "Chaudières vapeur, échangeurs thermiques, réseaux vapeur",
+                            Nom = "Chaud & Vapeur"
                         });
                 });
 
@@ -192,6 +478,10 @@ namespace GMAO.Infrastructure.Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("BucketName")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
                     b.Property<string>("Chemin")
                         .IsRequired()
                         .HasMaxLength(500)
@@ -201,6 +491,9 @@ namespace GMAO.Infrastructure.Data.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<int?>("EquipementId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("IncidentId")
                         .HasColumnType("integer");
 
                     b.Property<string>("MimeType")
@@ -218,6 +511,20 @@ namespace GMAO.Infrastructure.Data.Migrations
                     b.Property<int?>("PlanPreventifId")
                         .HasColumnType("integer");
 
+                    b.Property<string>("Sha256Checksum")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int?>("SocieteId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("StorageProvider")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("Local");
+
                     b.Property<long>("TailleFichierOctets")
                         .HasColumnType("bigint");
 
@@ -231,9 +538,15 @@ namespace GMAO.Infrastructure.Data.Migrations
 
                     b.HasIndex("EquipementId");
 
+                    b.HasIndex("IncidentId");
+
                     b.HasIndex("OTId");
 
                     b.HasIndex("PlanPreventifId");
+
+                    b.HasIndex("SocieteId");
+
+                    b.HasIndex("StorageProvider");
 
                     b.HasIndex("UploadedById");
 
@@ -487,18 +800,6 @@ namespace GMAO.Infrastructure.Data.Migrations
                             Id = 6,
                             Description = "Groupes frigorifiques et chambres froides",
                             Nom = "Réfrigération"
-                        },
-                        new
-                        {
-                            Id = 7,
-                            Description = "Autoclaves et tunnels de stérilisation",
-                            Nom = "Stérilisateurs"
-                        },
-                        new
-                        {
-                            Id = 8,
-                            Description = "Machines de remplissage et dosage",
-                            Nom = "Remplisseuses"
                         });
                 });
 
@@ -529,37 +830,50 @@ namespace GMAO.Infrastructure.Data.Migrations
                         new
                         {
                             Id = 1,
-                            Nom = "Roulements & Paliers"
+                            Description = "Roulements à billes, rouleaux, paliers",
+                            Nom = "Roulements"
                         },
                         new
                         {
                             Id = 2,
-                            Nom = "Joints & Garnitures"
+                            Description = "Vannes papillon, vannes sphériques, clapets",
+                            Nom = "Vannes"
                         },
                         new
                         {
                             Id = 3,
-                            Nom = "Courroies & Chaînes"
+                            Description = "Joints toriques, joints d'étanchéité, tresses",
+                            Nom = "Joints"
                         },
                         new
                         {
                             Id = 4,
+                            Description = "Filtres à huile, filtres à air, tamis",
                             Nom = "Filtres"
                         },
                         new
                         {
                             Id = 5,
-                            Nom = "Lubrifiants & Huiles"
+                            Description = "Courroies trapézoïdales, crantées",
+                            Nom = "Courroies"
                         },
                         new
                         {
                             Id = 6,
-                            Nom = "Composants Electriques"
+                            Description = "Moteurs de rechange, pompes de dosage",
+                            Nom = "Moteurs & Pompes"
                         },
                         new
                         {
                             Id = 7,
-                            Nom = "Visserie & Boulonnerie"
+                            Description = "Capteurs de température, pression, débit",
+                            Nom = "Capteurs"
+                        },
+                        new
+                        {
+                            Id = 8,
+                            Description = "Fusibles, contacteurs, disjoncteurs, relais",
+                            Nom = "Électricité"
                         });
                 });
 
@@ -1757,6 +2071,11 @@ namespace GMAO.Infrastructure.Data.Migrations
                         .HasForeignKey("EquipementId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("GMAO.Domain.Entities.DemandeIntervention", "Incident")
+                        .WithMany("Documents")
+                        .HasForeignKey("IncidentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("GMAO.Domain.Entities.OrdresTravail", "OT")
                         .WithMany("Documents")
                         .HasForeignKey("OTId")
@@ -1767,6 +2086,11 @@ namespace GMAO.Infrastructure.Data.Migrations
                         .HasForeignKey("PlanPreventifId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("GMAO.Domain.Entities.Societe", "Societe")
+                        .WithMany()
+                        .HasForeignKey("SocieteId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("GMAO.Domain.Entities.User", "UploadedBy")
                         .WithMany()
                         .HasForeignKey("UploadedById")
@@ -1775,9 +2099,13 @@ namespace GMAO.Infrastructure.Data.Migrations
 
                     b.Navigation("Equipement");
 
+                    b.Navigation("Incident");
+
                     b.Navigation("OT");
 
                     b.Navigation("PlanPreventif");
+
+                    b.Navigation("Societe");
 
                     b.Navigation("UploadedBy");
                 });
@@ -2095,6 +2423,8 @@ namespace GMAO.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("GMAO.Domain.Entities.DemandeIntervention", b =>
                 {
+                    b.Navigation("Documents");
+
                     b.Navigation("OrdreTravail");
                 });
 

@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
+using GMAO.Application.Interfaces;
 using GMAO.Domain.Entities;
 using GMAO.Domain.Enums;
 using GMAO.Domain.Interfaces;
@@ -17,24 +18,17 @@ namespace GMAO.API.Controllers;
 public class MouvementsStockController : ControllerBase
 {
     private readonly IGenericRepository<MouvementStock> _repository;
+    private readonly ITenantContextService _tenantContext;
 
-    public MouvementsStockController(IGenericRepository<MouvementStock> repository)
+    public MouvementsStockController(
+        IGenericRepository<MouvementStock> repository,
+        ITenantContextService tenantContext)
     {
         _repository = repository;
+        _tenantContext = tenantContext;
     }
 
-    private int GetSocieteId()
-    {
-        var tenantHeader = Request.Headers["X-Tenant-Id"].FirstOrDefault();
-        if (int.TryParse(tenantHeader, out int tenantId) && tenantId > 0)
-            return tenantId;
-
-        var societeIdClaim = User.FindFirst("SocieteId")?.Value;
-        if (int.TryParse(societeIdClaim, out int societeId) && societeId > 0)
-            return societeId;
-
-        return 1;
-    }
+    private int GetSocieteId() => _tenantContext.GetRequiredTenantId();
 
     [HttpGet]
     public async Task<IActionResult> GetAll([FromServices] GmaoDbContext context)

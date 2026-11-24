@@ -46,7 +46,7 @@ namespace GMAO.Application.Services
             foreach (var membreId in dto.MembreIds)
             {
                 var user = await _userRepository.GetByIdAsync(membreId);
-                if (user != null)
+                if (user != null && user.SocieteId == societeId)
                 {
                     equipe.Membres.Add(user);
                 }
@@ -58,7 +58,7 @@ namespace GMAO.Application.Services
 
         public async Task<EquipeDto> UpdateEquipeAsync(int id, UpdateEquipeDto dto)
         {
-            var equipe = await _equipeRepository.GetEquipeWithMembresAsync(id);
+            var equipe = await _equipeService_LoadForUpdate(id);
             if (equipe == null) throw new Exception("Equipe non trouvée");
 
             equipe.Nom = dto.Nom;
@@ -71,7 +71,7 @@ namespace GMAO.Application.Services
                 foreach (var membreId in dto.MembreIds)
                 {
                     var user = await _userRepository.GetByIdAsync(membreId);
-                    if (user != null)
+                    if (user != null && user.SocieteId == equipe.SocieteId)
                     {
                         equipe.Membres.Add(user);
                     }
@@ -81,6 +81,8 @@ namespace GMAO.Application.Services
             await _equipeRepository.UpdateAsync(equipe);
             return MapToDto(equipe);
         }
+
+        private async Task<Equipe?> _equipeService_LoadForUpdate(int id) => await _equipeRepository.GetEquipeWithMembresAsync(id);
 
         public async Task DeleteEquipeAsync(int id)
         {
@@ -95,7 +97,7 @@ namespace GMAO.Application.Services
         {
             var equipe = await _equipeRepository.GetEquipeWithMembresAsync(equipeId);
             var user = await _userRepository.GetByIdAsync(userId);
-            if (equipe != null && user != null && !equipe.Membres.Any(m => m.Id == userId))
+            if (equipe != null && user != null && user.SocieteId == equipe.SocieteId && !equipe.Membres.Any(m => m.Id == userId))
             {
                 equipe.Membres.Add(user);
                 await _equipeRepository.UpdateAsync(equipe);

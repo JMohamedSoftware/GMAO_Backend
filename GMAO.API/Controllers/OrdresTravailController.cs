@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Security.Claims;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
@@ -7,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using GMAO.Domain.Entities;
 using GMAO.Domain.Enums;
 using GMAO.Domain.Interfaces;
+using GMAO.Application.Interfaces;
 using GMAO.Infrastructure.Data;
 
 namespace GMAO.API.Controllers;
@@ -19,60 +21,28 @@ public class OrdresTravailController : ControllerBase
     private readonly IGenericRepository<OrdresTravail> _repository;
     private readonly IGenericRepository<DemandeIntervention> _incidentRepository;
     private readonly GmaoDbContext _context;
+    private readonly ITenantContextService _tenantContext;
 
     public OrdresTravailController(
         IGenericRepository<OrdresTravail> repository,
         IGenericRepository<DemandeIntervention> incidentRepository,
-        GmaoDbContext context)
+        GmaoDbContext context,
+        ITenantContextService tenantContext)
     {
         _repository = repository;
         _incidentRepository = incidentRepository;
         _context = context;
+        _tenantContext = tenantContext;
     }
 
-    private int GetSocieteId()
+    private int GetSocieteId() => _tenantContext.GetRequiredTenantId();
+
+    private int GetCurrentUserId()
     {
-        var tenantHeader = Request.Headers["X-Tenant-Id"].FirstOrDefault()?.Trim();
-        if (!string.IsNullOrEmpty(tenantHeader) && tenantHeader != "null" && tenantHeader != "undefined")
-        {
-            if (int.TryParse(tenantHeader, out int tenantId) && tenantId > 0)
-                return tenantId;
-
-            var soc = _context.Societes.AsNoTracking().FirstOrDefault(s => s.CodeTenant == tenantHeader);
-            if (soc != null && soc.Id > 0)
-                return soc.Id;
-        }
-
-        var societeIdClaim = User.FindFirst("SocieteId")?.Value;
-        if (int.TryParse(societeIdClaim, out int societeId) && societeId > 0)
-            return societeId;
-        return 1;
-    }
-
-    private async Task<int> ResolveSocieteIdAsync(OrdresTravail? ordre = null)
-    {
-        if (ordre != null && ordre.SocieteId.HasValue && ordre.SocieteId.Value > 0)
-            return ordre.SocieteId.Value;
-
-        if (ordre != null && ordre.EquipementId > 0)
-        {
-            var eqSocId = await _context.Equipements.AsNoTracking()
-                .Where(e => e.Id == ordre.EquipementId)
-                .Select(e => e.SocieteId)
-                .FirstOrDefaultAsync();
-            if (eqSocId > 0) return eqSocId;
-        }
-
-        if (ordre != null && ordre.DemandeId.HasValue && ordre.DemandeId.Value > 0)
-        {
-            var incSocId = await _context.DemandesIntervention.AsNoTracking()
-                .Where(d => d.Id == ordre.DemandeId.Value)
-                .Select(d => d.SocieteId)
-                .FirstOrDefaultAsync();
-            if (incSocId > 0) return incSocId;
-        }
-
-        return GetSocieteId();
+        var claim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value 
+            ?? User.FindFirst("id")?.Value 
+            ?? User.FindFirst("sub")?.Value;
+        return int.TryParse(claim, out int uid) ? uid : 0;
     }
 
     private static DateTime? ToUtc(DateTime? d)
@@ -90,11 +60,50 @@ public class OrdresTravailController : ControllerBase
     public async Task<IActionResult> GetAll()
     {
         int societeId = GetSocieteId();
-        var ordres = await _context.OrdresTravail
+        int currentUserId = GetCurrentUserId();
+
+        var query = _context.OrdresTravail
             .AsNoTracking()
             .Include(o => o.Campagne)
-            .Where(o => o.SocieteId == societeId)
-            .ToListAsync();
+            .Include(o => o.Technicien)
+            .Include(o => o.Responsable)
+            .Where(o => o.SocieteId == societeId);
+
+        // RBAC Scoping
+        bool isFullAccess = User.IsInRole("SuperAdmin") || 
+                            User.IsInRole("Administrateur") || 
+                            User.IsInRole("CompanyAdmin") ||
+                            User.HasClaim("Permission", "WORKORDER_VIEW_ALL") ||
+                            User.HasClaim("Permission", "WORKORDER_VIEW");
+
+        if (!isFullAccess)
+        {
+            if (User.HasClaim("Permission", "WORKORDER_VIEW_TEAM"))
+            {
+                var currentUser = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == currentUserId);
+                int? teamId = currentUser?.EquipeId;
+
+                if (teamId.HasValue)
+                {
+                    query = query.Where(ot => 
+                        ot.TechnicienId == currentUserId || 
+                        ot.ResponsableId == currentUserId ||
+                        (ot.Technicien != null && ot.Technicien.EquipeId == teamId.Value) ||
+                        (ot.Responsable != null && ot.Responsable.EquipeId == teamId.Value));
+                }
+                else
+                {
+                    query = query.Where(ot => ot.TechnicienId == currentUserId || ot.ResponsableId == currentUserId);
+                }
+            }
+            else
+            {
+                // Default / WORKORDER_VIEW_OWN: only see own work orders
+                query = query.Where(ot => ot.TechnicienId == currentUserId || ot.ResponsableId == currentUserId);
+            }
+        }
+
+        var ordres = await query.ToListAsync();
         return Ok(ordres);
     }
 
@@ -102,10 +111,45 @@ public class OrdresTravailController : ControllerBase
     public async Task<IActionResult> GetById(int id)
     {
         int societeId = GetSocieteId();
+        int currentUserId = GetCurrentUserId();
+
         var ordre = await _context.OrdresTravail
             .AsNoTracking()
+            .Include(o => o.Campagne)
+            .Include(o => o.Technicien)
+            .Include(o => o.Responsable)
             .FirstOrDefaultAsync(o => o.Id == id && o.SocieteId == societeId);
+
         if (ordre == null) return NotFound();
+
+        // RBAC Scope Check
+        bool isFullAccess = User.IsInRole("SuperAdmin") || 
+                            User.IsInRole("Administrateur") || 
+                            User.IsInRole("CompanyAdmin") ||
+                            User.HasClaim("Permission", "WORKORDER_VIEW_ALL") ||
+                            User.HasClaim("Permission", "WORKORDER_VIEW");
+
+        if (!isFullAccess)
+        {
+            if (User.HasClaim("Permission", "WORKORDER_VIEW_TEAM"))
+            {
+                var currentUser = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == currentUserId);
+                int? teamId = currentUser?.EquipeId;
+                bool isUserTeam = teamId.HasValue && (
+                    (ordre.Technicien != null && ordre.Technicien.EquipeId == teamId.Value) ||
+                    (ordre.Responsable != null && ordre.Responsable.EquipeId == teamId.Value));
+
+                if (ordre.TechnicienId != currentUserId && ordre.ResponsableId != currentUserId && !isUserTeam)
+                {
+                    return Forbid();
+                }
+            }
+            else if (ordre.TechnicienId != currentUserId && ordre.ResponsableId != currentUserId)
+            {
+                return Forbid();
+            }
+        }
+
         return Ok(ordre);
     }
 
@@ -118,14 +162,14 @@ public class OrdresTravailController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] OrdresTravail ordre)
     {
-        int societeId = await ResolveSocieteIdAsync(ordre);
+        int societeId = GetSocieteId();
         ordre.SocieteId = societeId;
 
         // If DemandeId already has an OT in the database, return it instead of failing on unique constraint
         if (ordre.DemandeId.HasValue && ordre.DemandeId.Value > 0)
         {
             var existingForDemande = await _context.OrdresTravail
-                .FirstOrDefaultAsync(o => o.DemandeId == ordre.DemandeId.Value);
+                .FirstOrDefaultAsync(o => o.DemandeId == ordre.DemandeId.Value && o.SocieteId == societeId);
             if (existingForDemande != null)
             {
                 return Ok(existingForDemande);
@@ -191,7 +235,7 @@ public class OrdresTravailController : ControllerBase
         if (ordre.DemandeId.HasValue)
         {
             var incident = await _incidentRepository.GetByIdAsync(ordre.DemandeId.Value);
-            if (incident != null)
+            if (incident != null && incident.SocieteId == societeId)
             {
                 incident.Statut = StatutDemande.TransformeeEnOT;
                 await _incidentRepository.UpdateAsync(incident);
@@ -201,7 +245,7 @@ public class OrdresTravailController : ControllerBase
         // Auto-update equipment status: if Corrective or high/urgent priority, mark as EnPanne
         if (ordre.EquipementId > 0 && (ordre.TypeMaintenance == TypeMaintenance.Corrective || (int)ordre.Priorite >= (int)PrioriteIntervention.Haute))
         {
-            var equipement = await _context.Equipements.FirstOrDefaultAsync(e => e.Id == ordre.EquipementId);
+            var equipement = await _context.Equipements.FirstOrDefaultAsync(e => e.Id == ordre.EquipementId && e.SocieteId == societeId);
             if (equipement != null)
             {
                 equipement.Etat = EtatEquipement.EnPanne;
@@ -214,11 +258,11 @@ public class OrdresTravailController : ControllerBase
     }
 
     /// <summary>
-    /// Updates a work order. Copies scalar fields onto the tracked entity to avoid
-    /// EF Core "duplicate tracking" InvalidOperationException.
-    /// Also updates the related equipment status according to the OT lifecycle:
-    /// - En cours (3) -> Equipement En maintenance (3)
-    /// - Terminé (5) or Clôturé (6) -> Equipement En service (1)
+    /// Updates a work order. Validates OT State Machine transitions and permissions:
+    /// - Terminal states (Cloture, Annule) cannot be mutated unless SuperAdmin.
+    /// - Transitioning to Cloture (6) requires managerial authorization.
+    /// - Real start/end dates follow lifecycle.
+    /// - Equipment status is automatically updated according to OT lifecycle.
     /// </summary>
     [HttpPut("{id}")]
     public async Task<IActionResult> Update(int id, [FromBody] OrdresTravail ordre)
@@ -230,10 +274,51 @@ public class OrdresTravailController : ControllerBase
             .FirstOrDefaultAsync(o => o.Id == id && o.SocieteId == societeId);
         if (existing == null) return NotFound();
 
-        // Patch only scalar/value properties.
-        // NumeroOT is an immutable identifier (unique index, max 30 chars) — never
-        // overwrite it with free text (the frontend used to send the title here,
-        // which broke the unique index for preventive OTs sharing the same description).
+        // ── WORK ORDER STATE MACHINE VALIDATION ────────────────────────────
+        var currentStatut = existing.Statut;
+        var targetStatut = ordre.Statut;
+
+        if (currentStatut != targetStatut)
+        {
+            // 1. Guard against modifications from terminal states
+            if (currentStatut == StatutOT.Cloture && !User.IsInRole("SuperAdmin"))
+            {
+                return Conflict("Un ordre de travail clôturé ne peut plus changer de statut.");
+            }
+            if (currentStatut == StatutOT.Annule && !User.IsInRole("SuperAdmin"))
+            {
+                return Conflict("Un ordre de travail annulé ne peut plus changer de statut.");
+            }
+
+            // 2. Guard for Clôture administrative (StatutOT.Cloture = 6)
+            if (targetStatut == StatutOT.Cloture)
+            {
+                bool canClose = User.IsInRole("SuperAdmin") ||
+                                User.IsInRole("Administrateur") ||
+                                User.IsInRole("CompanyAdmin") ||
+                                User.IsInRole("ResponsableMaintenance") ||
+                                User.HasClaim("Permission", "WORKORDER_CLOSE") ||
+                                User.HasClaim("Permission", "WORKORDER_UPDATE_ALL");
+
+                if (!canClose)
+                {
+                    return Forbid();
+                }
+
+                if (currentStatut != StatutOT.Termine && currentStatut != StatutOT.EnCours && !User.IsInRole("SuperAdmin"))
+                {
+                    return Conflict("Un ordre de travail doit être au moins en cours ou terminé avant d'être clôturé administrativement.");
+                }
+            }
+
+            // 3. Guard: From Termine (5), only allowed transitions are Cloture (6) or Reopen to EnCours (3)
+            if (currentStatut == StatutOT.Termine && targetStatut != StatutOT.Cloture && targetStatut != StatutOT.EnCours && !User.IsInRole("SuperAdmin"))
+            {
+                return Conflict("Un ordre de travail terminé ne peut être que clôturé ou réouvert pour ré-intervention.");
+            }
+        }
+
+        // Patch only scalar/value properties
         if (string.IsNullOrWhiteSpace(existing.NumeroOT) &&
             !string.IsNullOrWhiteSpace(ordre.NumeroOT) && ordre.NumeroOT.Length <= 30)
         {
@@ -245,7 +330,7 @@ public class OrdresTravailController : ControllerBase
         existing.TechnicienId      = ordre.TechnicienId ?? existing.TechnicienId;
         existing.Priorite          = ordre.Priorite;
         existing.TypeMaintenance   = ordre.TypeMaintenance;
-        existing.Statut            = ordre.Statut;
+        existing.Statut            = targetStatut;
         existing.DateDebutPrevue   = ordre.DateDebutPrevue ?? existing.DateDebutPrevue;
         existing.DateFinPrevue     = ordre.DateFinPrevue ?? existing.DateFinPrevue;
         existing.DateDebutReelle   = ordre.DateDebutReelle ?? existing.DateDebutReelle;
@@ -257,13 +342,13 @@ public class OrdresTravailController : ControllerBase
         existing.CoutSousTraitance = ordre.CoutSousTraitance ?? existing.CoutSousTraitance;
         existing.CampagneId        = ordre.CampagneId ?? existing.CampagneId;
 
-        // Real start / end dates follow the lifecycle
+        // Real start / end dates follow lifecycle
         if (existing.Statut == StatutOT.EnCours && existing.DateDebutReelle == null)
             existing.DateDebutReelle = DateTime.UtcNow;
-        if ((existing.Statut == StatutOT.Termine || (int)existing.Statut == 6) && existing.DateFinReelle == null)
+        if ((existing.Statut == StatutOT.Termine || existing.Statut == StatutOT.Cloture) && existing.DateFinReelle == null)
             existing.DateFinReelle = DateTime.UtcNow;
 
-        // Npgsql (timestamptz) refuses non-UTC DateTime values
+        // Npgsql timestamptz requires UTC DateTime
         existing.DateDebutPrevue = ToUtc(existing.DateDebutPrevue);
         existing.DateFinPrevue   = ToUtc(existing.DateFinPrevue);
         existing.DateDebutReelle = ToUtc(existing.DateDebutReelle);
@@ -283,7 +368,7 @@ public class OrdresTravailController : ControllerBase
                     equipement.UpdatedAt = DateTime.UtcNow;
                     await _context.SaveChangesAsync();
                 }
-                else if (existing.Statut == StatutOT.Termine || (int)existing.Statut == 6) // Terminé or Clôturé
+                else if (existing.Statut == StatutOT.Termine || existing.Statut == StatutOT.Cloture)
                 {
                     equipement.Etat = EtatEquipement.EnService;
                     equipement.UpdatedAt = DateTime.UtcNow;
@@ -293,9 +378,9 @@ public class OrdresTravailController : ControllerBase
         }
 
         // Auto-close linked incident when OT is completed or closed
-        if ((existing.Statut == StatutOT.Termine || (int)existing.Statut == 6) && existing.DemandeId.HasValue && existing.DemandeId.Value > 0)
+        if ((existing.Statut == StatutOT.Termine || existing.Statut == StatutOT.Cloture) && existing.DemandeId.HasValue && existing.DemandeId.Value > 0)
         {
-            var incident = await _context.DemandesIntervention.FirstOrDefaultAsync(d => d.Id == existing.DemandeId.Value);
+            var incident = await _context.DemandesIntervention.FirstOrDefaultAsync(d => d.Id == existing.DemandeId.Value && d.SocieteId == societeId);
             if (incident != null)
             {
                 incident.Statut = StatutDemande.Cloturee;
