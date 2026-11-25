@@ -51,7 +51,7 @@ public class WorkOrderStateMachineTests
         var user = new ClaimsPrincipal(new ClaimsIdentity(new[]
         {
             new Claim(ClaimTypes.NameIdentifier, "10"),
-            new Claim(ClaimTypes.Role, "ChefEquipe"),
+            new Claim(ClaimTypes.Role, GMAO.Domain.Constants.GmaoRoles.ChefEquipe),
             new Claim("SocieteId", "1")
         }, "TestAuth"));
 
@@ -121,7 +121,7 @@ public class WorkOrderStateMachineTests
         var user = new ClaimsPrincipal(new ClaimsIdentity(new[]
         {
             new Claim(ClaimTypes.NameIdentifier, "5"),
-            new Claim(ClaimTypes.Role, "ResponsableMaintenance"),
+            new Claim(ClaimTypes.Role, GMAO.Domain.Constants.GmaoRoles.ResponsableMaintenance),
             new Claim("SocieteId", "1")
         }, "TestAuth"));
 
@@ -157,7 +157,7 @@ public class WorkOrderStateMachineTests
         var user = new ClaimsPrincipal(new ClaimsIdentity(new[]
         {
             new Claim(ClaimTypes.NameIdentifier, "5"),
-            new Claim(ClaimTypes.Role, "ResponsableMaintenance"),
+            new Claim(ClaimTypes.Role, GMAO.Domain.Constants.GmaoRoles.ResponsableMaintenance),
             new Claim("SocieteId", "1")
         }, "TestAuth"));
 

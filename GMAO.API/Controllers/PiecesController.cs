@@ -1,13 +1,15 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.EntityFrameworkCore;
+using GMAO.API.Security;
 using GMAO.Application.Interfaces;
+using GMAO.Application.Security;
 using GMAO.Domain.Entities;
 using GMAO.Domain.Interfaces;
 using GMAO.Infrastructure.Data;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace GMAO.API.Controllers;
 
@@ -33,35 +35,48 @@ public class PiecesController : ControllerBase
     private int GetSocieteId() => _tenantContext.GetRequiredTenantId();
 
     [HttpGet]
+    [HasPermission(GmaoPermissions.InventoryView)]
     public async Task<IActionResult> GetAll()
     {
         int societeId = GetSocieteId();
         var pieces = await _context.Pieces
             .AsNoTracking()
-            .Where(p => p.SocieteId == societeId || (societeId == 1 && (p.SocieteId == null || p.SocieteId == 0)))
+            .Where(p => p.SocieteId == societeId)
             .OrderBy(p => p.Reference)
             .ToListAsync();
         return Ok(pieces);
     }
 
     [HttpGet("{id}")]
+    [HasPermission(GmaoPermissions.InventoryView)]
     public async Task<IActionResult> GetById(int id)
     {
         int societeId = GetSocieteId();
         var piece = await _context.Pieces
             .AsNoTracking()
-            .FirstOrDefaultAsync(p => p.Id == id && (p.SocieteId == societeId || (societeId == 1 && (p.SocieteId == null || p.SocieteId == 0))));
+            .FirstOrDefaultAsync(p => p.Id == id && p.SocieteId == societeId);
         if (piece == null) return NotFound();
         return Ok(piece);
     }
 
     [HttpPost]
+    [HasPermission(GmaoPermissions.InventoryCreate)]
     public async Task<IActionResult> Create([FromBody] Piece piece)
     {
+        if (piece.StockActuel < 0 || piece.StockMinimum < 0 || piece.PrixUnitaire < 0)
+            return BadRequest(new { message = "Les quantités de stock et prix unitaire ne peuvent pas être négatifs." });
+
         int societeId = GetSocieteId();
         piece.SocieteId = societeId;
 
-        // Auto-generate or resolve reference if empty or already in use for this tenant
+        if (piece.FournisseurId.HasValue && piece.FournisseurId.Value > 0)
+        {
+            var supValid = await _context.Fournisseurs.AsNoTracking()
+                .AnyAsync(f => f.Id == piece.FournisseurId.Value && f.SocieteId == societeId);
+            if (!supValid)
+                return BadRequest(new { message = "Le fournisseur sélectionné n'appartient pas à votre société." });
+        }
+
         if (string.IsNullOrWhiteSpace(piece.Reference))
         {
             var count = await _context.Pieces.CountAsync(p => p.SocieteId == societeId);
@@ -87,23 +102,31 @@ public class PiecesController : ControllerBase
     }
 
     [HttpPut("{id}")]
+    [HasPermission(GmaoPermissions.InventoryUpdate)]
     public async Task<IActionResult> Update(int id, [FromBody] Piece piece)
     {
         if (id != piece.Id) return BadRequest();
+        if (piece.StockActuel < 0 || piece.StockMinimum < 0 || piece.PrixUnitaire < 0)
+            return BadRequest(new { message = "Les quantités de stock et prix unitaire ne peuvent pas être négatifs." });
 
         int societeId = GetSocieteId();
         var existing = await _context.Pieces
             .FirstOrDefaultAsync(p => p.Id == id && p.SocieteId == societeId);
         if (existing == null) return NotFound();
 
+        if (piece.FournisseurId.HasValue && piece.FournisseurId.Value > 0)
+        {
+            var supValid = await _context.Fournisseurs.AsNoTracking()
+                .AnyAsync(f => f.Id == piece.FournisseurId.Value && f.SocieteId == societeId);
+            if (!supValid)
+                return BadRequest(new { message = "Le fournisseur sélectionné n'appartient pas à votre société." });
+        }
+
         if (!string.IsNullOrWhiteSpace(piece.Reference))
         {
-            // Verify reference uniqueness within company (excluding this piece)
             var refExists = await _context.Pieces.AnyAsync(p => p.Id != id && p.SocieteId == societeId && p.Reference.ToLower() == piece.Reference.Trim().ToLower());
             if (!refExists)
-            {
                 existing.Reference = piece.Reference.Trim();
-            }
         }
 
         existing.Designation = piece.Designation ?? existing.Designation;
@@ -121,6 +144,7 @@ public class PiecesController : ControllerBase
     }
 
     [HttpDelete("{id}")]
+    [HasPermission(GmaoPermissions.InventoryDelete)]
     public async Task<IActionResult> Delete(int id)
     {
         int societeId = GetSocieteId();

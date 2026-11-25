@@ -1,16 +1,16 @@
 using System.Threading.Tasks;
 using System.Linq;
 using System.Security.Claims;
+using GMAO.API.Security;
+using GMAO.Application.DTOs.Equipements;
+using GMAO.Application.Interfaces;
+using GMAO.Application.Security;
 using GMAO.Domain.Entities;
 using GMAO.Domain.Interfaces;
-using GMAO.Application.DTOs.Equipements;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
-
 using GMAO.Infrastructure.Data;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-
-using GMAO.Application.Interfaces;
 
 namespace GMAO.API.Controllers;
 
@@ -48,6 +48,7 @@ public class EquipementController : ControllerBase
     }
 
     [HttpGet]
+    [HasPermission(GmaoPermissions.EquipmentView)]
     public async Task<IActionResult> GetAll()
     {
         var societeId = GetSocieteId();
@@ -95,6 +96,7 @@ public class EquipementController : ControllerBase
     }
 
     [HttpGet("{id}")]
+    [HasPermission(GmaoPermissions.EquipmentView)]
     public async Task<IActionResult> GetById(string id)
     {
         var societeId = GetSocieteId();
@@ -304,7 +306,36 @@ public class EquipementController : ControllerBase
         return GMAO.Domain.Enums.EtatEquipement.EnService;
     }
 
+    private async Task<int?> ResolveTenantLocalisationIdAsync(object? locObj, int societeId)
+    {
+        var requestedId = ParseNullableInt(locObj);
+        if (requestedId.HasValue && requestedId.Value > 0)
+        {
+            var valid = await _context.Localisations.AsNoTracking()
+                .AnyAsync(l => l.Id == requestedId.Value && l.SocieteId == societeId);
+            if (valid) return requestedId.Value;
+            return null;
+        }
+
+        return await _context.Localisations.AsNoTracking()
+            .Where(l => l.SocieteId == societeId)
+            .OrderBy(l => l.Id)
+            .Select(l => (int?)l.Id)
+            .FirstOrDefaultAsync();
+    }
+
+    private async Task<int?> ResolveTenantFournisseurIdAsync(object? fourObj, int societeId)
+    {
+        var requestedId = ParseNullableInt(fourObj);
+        if (!requestedId.HasValue || requestedId.Value <= 0) return null;
+
+        var valid = await _context.Fournisseurs.AsNoTracking()
+            .AnyAsync(f => f.Id == requestedId.Value && f.SocieteId == societeId);
+        return valid ? requestedId.Value : null;
+    }
+
     [HttpPost]
+    [HasPermission(GmaoPermissions.EquipmentCreate)]
     public async Task<IActionResult> Create([FromBody] EquipementInputDto dto)
     {
         var societeId = GetSocieteId();
@@ -312,6 +343,8 @@ public class EquipementController : ControllerBase
         var designation = dto.Designation ?? dto.Name ?? "Nouvel Équipement";
         var code = string.IsNullOrWhiteSpace(dto.Code) ? $"EQ-{DateTime.UtcNow.Ticks % 100000:D5}" : dto.Code;
         var familleId = await ResolveFamilleIdAsync(dto.FamilleId, dto.Category ?? dto.FamilleNom);
+        var localisationId = await ResolveTenantLocalisationIdAsync(dto.LocalisationId, societeId);
+        var fournisseurId = await ResolveTenantFournisseurIdAsync(dto.FournisseurId, societeId);
 
         var equipement = new Equipement
         {
@@ -319,7 +352,7 @@ public class EquipementController : ControllerBase
             Code = code,
             Designation = designation,
             FamilleId = familleId,
-            LocalisationId = ParseNullableInt(dto.LocalisationId) ?? 1,
+            LocalisationId = localisationId,
             Marque = dto.Marque ?? dto.Brand,
             Modele = dto.Modele ?? dto.Model,
             NumeroSerie = dto.NumeroSerie ?? dto.SerialNumber,
@@ -328,7 +361,7 @@ public class EquipementController : ControllerBase
             DateFinGarantie = ParseDateOnly(dto.DateFinGarantie),
             Criticite = ParseCriticite(dto.Criticite ?? dto.Criticality),
             Etat = ParseEtat(dto.Etat ?? dto.Status),
-            FournisseurId = ParseNullableInt(dto.FournisseurId),
+            FournisseurId = fournisseurId,
             PhotoUrl = dto.PhotoUrl,
             Notes = dto.Notes,
             CreatedAt = DateTime.UtcNow,
@@ -368,6 +401,7 @@ public class EquipementController : ControllerBase
     }
 
     [HttpPut("{id}")]
+    [HasPermission(GmaoPermissions.EquipmentUpdate)]
     public async Task<IActionResult> Update(string id, [FromBody] EquipementInputDto dto)
     {
         var societeId = GetSocieteId();
@@ -395,7 +429,7 @@ public class EquipementController : ControllerBase
                 Code = !string.IsNullOrWhiteSpace(dto.Code) ? dto.Code : id,
                 Designation = dto.Designation ?? dto.Name ?? "Nouvel Équipement",
                 FamilleId = await ResolveFamilleIdAsync(dto.FamilleId, catNameNew),
-                LocalisationId = ParseNullableInt(dto.LocalisationId) ?? 1,
+                LocalisationId = await ResolveTenantLocalisationIdAsync(dto.LocalisationId, societeId),
                 Marque = dto.Marque ?? dto.Brand,
                 Modele = dto.Modele ?? dto.Model,
                 NumeroSerie = dto.NumeroSerie ?? dto.SerialNumber,
@@ -404,7 +438,7 @@ public class EquipementController : ControllerBase
                 DateFinGarantie = ParseDateOnly(dto.DateFinGarantie),
                 Criticite = ParseCriticite(dto.Criticite ?? dto.Criticality),
                 Etat = ParseEtat(dto.Etat ?? dto.Status),
-                FournisseurId = ParseNullableInt(dto.FournisseurId),
+                FournisseurId = await ResolveTenantFournisseurIdAsync(dto.FournisseurId, societeId),
                 PhotoUrl = dto.PhotoUrl,
                 Notes = dto.Notes,
                 CreatedAt = DateTime.UtcNow,
@@ -424,8 +458,11 @@ public class EquipementController : ControllerBase
             existing.Famille = null!; // Clear navigation property so EF Core updates the foreign key without in-memory entity conflict
         }
 
-        var locId = ParseNullableInt(dto.LocalisationId);
-        if (locId.HasValue && locId.Value > 0) existing.LocalisationId = locId.Value;
+        if (dto.LocalisationId != null)
+        {
+            var locId = await ResolveTenantLocalisationIdAsync(dto.LocalisationId, societeId);
+            if (locId.HasValue) existing.LocalisationId = locId.Value;
+        }
 
         existing.Marque = dto.Marque ?? dto.Brand ?? existing.Marque;
         existing.Modele = dto.Modele ?? dto.Model ?? existing.Modele;
@@ -443,8 +480,11 @@ public class EquipementController : ControllerBase
             existing.Etat = ParseEtat(dto.Etat ?? dto.Status);
         }
 
-        var fourId = ParseNullableInt(dto.FournisseurId);
-        if (fourId.HasValue) existing.FournisseurId = fourId.Value;
+        if (dto.FournisseurId != null)
+        {
+            var fourId = await ResolveTenantFournisseurIdAsync(dto.FournisseurId, societeId);
+            if (fourId.HasValue) existing.FournisseurId = fourId.Value;
+        }
 
         existing.PhotoUrl = dto.PhotoUrl ?? existing.PhotoUrl;
         existing.Notes = dto.Notes ?? existing.Notes;
@@ -455,6 +495,7 @@ public class EquipementController : ControllerBase
     }
 
     [HttpDelete("{id}")]
+    [HasPermission(GmaoPermissions.EquipmentDelete)]
     public async Task<IActionResult> Delete(string id)
     {
         var societeId = GetSocieteId();
@@ -477,6 +518,7 @@ public class EquipementController : ControllerBase
     }
 
     [HttpPost("{id}/pieces/{pieceIdentifier}")]
+    [HasPermission(GmaoPermissions.EquipmentUpdate)]
     public async Task<IActionResult> LinkPiece(string id, string pieceIdentifier)
     {
         var societeId = GetSocieteId();
@@ -517,6 +559,7 @@ public class EquipementController : ControllerBase
     }
 
     [HttpDelete("{id}/pieces/{pieceIdentifier}")]
+    [HasPermission(GmaoPermissions.EquipmentUpdate)]
     public async Task<IActionResult> UnlinkPiece(string id, string pieceIdentifier)
     {
         var societeId = GetSocieteId();

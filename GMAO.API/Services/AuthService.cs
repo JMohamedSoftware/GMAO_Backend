@@ -1,20 +1,24 @@
-using System.Threading.Tasks;
-using GMAO.Application.Interfaces;
-using GMAO.Domain.Entities;
-using GMAO.Domain.Interfaces;
-using GMAO.Application.DTOs.Auth;
-using Microsoft.Extensions.Configuration;
-using Microsoft.IdentityModel.Tokens;
+using System;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
-using System;
+using System.Threading.Tasks;
+using GMAO.Application.DTOs.Auth;
+using GMAO.Application.Interfaces;
+using GMAO.Application.Security;
+using GMAO.Domain.Constants;
+using GMAO.Domain.Entities;
+using GMAO.Domain.Interfaces;
+using Microsoft.Extensions.Configuration;
+using Microsoft.IdentityModel.Tokens;
 
 namespace GMAO.Application.Services;
 
 public class AuthService : IAuthService
 {
+    private const string ExplicitEmptyPermissionMarker = "__NONE__";
+
     private readonly IUserRepository _userRepository;
     private readonly IGenericRepository<RefreshToken> _refreshTokenRepository;
     private readonly IConfiguration _configuration;
@@ -31,13 +35,20 @@ public class AuthService : IAuthService
 
     public async Task<AuthResponseDto> LoginAsync(string email, string password)
     {
-        var normalizedEmail = (email ?? "").Trim();
+        var normalizedEmail = (email ?? "").Trim().ToLowerInvariant();
         var user = await _userRepository.GetByEmailAsync(normalizedEmail);
         if (user == null || !user.IsActive)
             throw new Exception("Identifiants incorrects ou compte inactif.");
 
         if (!PasswordHasher.VerifyPassword(password, user.PasswordHash))
             throw new Exception("Identifiants incorrects.");
+
+        // Migration transparente des anciens hash SHA-256 vérifiés vers BCrypt
+        if (PasswordHasher.NeedsRehash(user.PasswordHash))
+        {
+            user.PasswordHash = PasswordHasher.HashPassword(password);
+            await _userRepository.UpdateAsync(user);
+        }
 
         var accessToken = GenerateJwtToken(user);
         var refreshToken = GenerateRefreshToken();
@@ -71,14 +82,12 @@ public class AuthService : IAuthService
         if (user == null || !user.IsActive)
             throw new Exception("Utilisateur introuvable ou inactif.");
 
-        // Invalidate old token
         rt.IsRevoked = true;
         await _refreshTokenRepository.UpdateAsync(rt);
 
-        var fullUser = await _userRepository.GetByEmailAsync(user.Email);
+        var fullUser = await _userRepository.GetByEmailAsync(user.Email) ?? user;
 
-        // Generate new tokens
-        var newAccessToken = GenerateJwtToken(fullUser ?? user);
+        var newAccessToken = GenerateJwtToken(fullUser);
         var newRefreshToken = GenerateRefreshToken();
 
         var newRt = new RefreshToken
@@ -94,7 +103,7 @@ public class AuthService : IAuthService
         {
             AccessToken = newAccessToken,
             RefreshToken = newRefreshToken,
-            User = MapToDto(fullUser ?? user)
+            User = MapToDto(fullUser)
         };
     }
 
@@ -113,13 +122,16 @@ public class AuthService : IAuthService
     {
         var user = await _userRepository.GetByIdAsync(userId);
         if (user == null) throw new Exception("Utilisateur introuvable.");
-        
+
         var fullUser = await _userRepository.GetByEmailAsync(user.Email);
         return MapToDto(fullUser ?? user);
     }
 
     public async Task<bool> ChangePasswordAsync(int userId, string oldPassword, string newPassword)
     {
+        if (string.IsNullOrWhiteSpace(newPassword) || newPassword.Length < 6)
+            throw new Exception("Le nouveau mot de passe doit contenir au moins 6 caractères.");
+
         var user = await _userRepository.GetByIdAsync(userId);
         if (user == null) throw new Exception("Utilisateur introuvable.");
 
@@ -133,19 +145,22 @@ public class AuthService : IAuthService
 
     public async Task<User> RegisterAsync(User user, string password)
     {
-        user.Email = (user.Email ?? "").Trim().ToLower();
+        if (string.IsNullOrWhiteSpace(password) || password.Length < 6)
+            throw new Exception("Le mot de passe doit contenir au moins 6 caractères.");
+
+        user.Email = (user.Email ?? "").Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(user.Email))
+            throw new Exception("L'adresse email est obligatoire.");
+
         var existingUser = await _userRepository.GetByEmailAsync(user.Email);
         if (existingUser != null)
-        {
             throw new Exception("L'email est déjà utilisé.");
-        }
-        
+
         user.PasswordHash = PasswordHasher.HashPassword(password);
         await _userRepository.AddAsync(user);
         return user;
     }
 
-    // --- Helpers ---
     private string GenerateJwtToken(User user)
     {
         var jwtSettings = _configuration.GetSection("JwtSettings");
@@ -157,8 +172,10 @@ public class AuthService : IAuthService
             new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
             new Claim(JwtRegisteredClaimNames.Email, user.Email),
             new Claim(ClaimTypes.Role, user.Role?.Nom ?? "Utilisateur"),
-            new Claim("name", $"{user.Prenom} {user.Nom}"),
-            new Claim("SocieteId", user.SocieteId?.ToString() ?? "")
+            new Claim("name", $"{user.Prenom} {user.Nom}".Trim()),
+            new Claim("SocieteId", user.SocieteId?.ToString() ?? ""),
+            new Claim("EquipeId", user.EquipeId?.ToString() ?? ""),
+            new Claim(GmaoPermissions.PermissionsLoadedClaim, "true")
         };
 
         var effectivePermissions = GetEffectivePermissions(user);
@@ -178,30 +195,36 @@ public class AuthService : IAuthService
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    private List<string> GetEffectivePermissions(User user)
+    private static List<string> GetEffectivePermissions(User user)
     {
-        if (user.Role?.RolePermissions == null) return new List<string>();
+        var rolePermissions = user.Role?.RolePermissions;
 
-        // 1. Permissions personnalisées pour l'entreprise
-        if (user.SocieteId.HasValue && user.SocieteId.Value > 0)
+        if (rolePermissions != null && user.SocieteId.HasValue && user.SocieteId.Value > 0)
         {
-            var tenantPerms = user.Role.RolePermissions
+            var tenantPerms = rolePermissions
                 .Where(rp => rp.SocieteId == user.SocieteId.Value)
                 .Select(rp => rp.PermissionName)
                 .ToList();
 
             if (tenantPerms.Any())
-                return tenantPerms;
+                return tenantPerms.Where(p => p != ExplicitEmptyPermissionMarker).ToList();
         }
 
-        // 2. Repli vers les permissions par défaut système (SocieteId == null)
-        return user.Role.RolePermissions
-            .Where(rp => rp.SocieteId == null)
-            .Select(rp => rp.PermissionName)
-            .ToList();
+        if (rolePermissions != null)
+        {
+            var globalPerms = rolePermissions
+                .Where(rp => rp.SocieteId == null)
+                .Select(rp => rp.PermissionName)
+                .ToList();
+
+            if (globalPerms.Any())
+                return globalPerms.Where(p => p != ExplicitEmptyPermissionMarker).ToList();
+        }
+
+        return GmaoPermissions.GetDefaultPermissionsForRole(user.Role?.Nom).ToList();
     }
 
-    private string GenerateRefreshToken()
+    private static string GenerateRefreshToken()
     {
         var randomNumber = new byte[32];
         using var rng = RandomNumberGenerator.Create();
@@ -209,21 +232,22 @@ public class AuthService : IAuthService
         return Convert.ToBase64String(randomNumber);
     }
 
-    private UserProfileDto MapToDto(User user)
+    private static UserProfileDto MapToDto(User user)
     {
         var roleName = user.Role?.Nom ?? "Utilisateur";
 
-        if (user.Societe == null && roleName != "SuperAdmin")
+        if (user.Societe == null && roleName != GmaoRoles.SuperAdmin)
             throw new Exception("Cet utilisateur n'est rattaché à aucune société.");
 
         return new UserProfileDto
         {
             Id = user.Id,
             Email = user.Email,
-            Name = $"{user.Prenom} {user.Nom}",
+            Name = $"{user.Prenom} {user.Nom}".Trim(),
             Role = roleName,
             TenantId = user.Societe?.CodeTenant ?? "platform",
             TenantName = user.Societe?.Nom ?? "Plateforme GMAO",
+            EquipeId = user.EquipeId,
             IsActive = user.IsActive,
             CreatedAt = user.CreatedAt.ToString("o"),
             Permissions = GetEffectivePermissions(user)

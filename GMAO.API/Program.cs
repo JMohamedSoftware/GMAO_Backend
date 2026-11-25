@@ -25,9 +25,25 @@ builder.Services.AddScoped<ITenantContextService, TenantContextService>();
 builder.Services.AddSingleton<AuditSaveChangesInterceptor>();
 
 // ── Base de données PostgreSQL + Audit Trail Interceptor ─────────────────────
+var rawDefaultConn = builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection manquante.");
+var connBuilder = new Npgsql.NpgsqlConnectionStringBuilder(rawDefaultConn);
+var caCertPath = builder.Configuration["Database:SslRootCertificatePath"]
+    ?? Environment.GetEnvironmentVariable("POSTGRES_CA_CERT_PATH")
+    ?? Environment.GetEnvironmentVariable("PGSSLROOTCERT");
+
+bool hasCaCert = !string.IsNullOrWhiteSpace(caCertPath) && File.Exists(caCertPath);
+if (hasCaCert)
+{
+    connBuilder.SslMode = Npgsql.SslMode.VerifyFull;
+    connBuilder.RootCertificate = caCertPath;
+}
+
+var effectiveConnStr = connBuilder.ConnectionString;
+
 builder.Services.AddDbContext<GmaoDbContext>((sp, options) =>
     options.UseNpgsql(
-        builder.Configuration.GetConnectionString("DefaultConnection"),
+        effectiveConnStr,
         npgsqlOptions => npgsqlOptions.MigrationsAssembly("GMAO.Infrastructure")
     ).AddInterceptors(sp.GetRequiredService<AuditSaveChangesInterceptor>())
 );
@@ -58,22 +74,15 @@ builder.Services.AddAuthentication(options =>
 
 builder.Services.AddAuthorization(options =>
 {
-    // Define policies for generic actions
     options.AddPolicy("WorkOrderCreate", policy => policy.RequireAssertion(context =>
-        context.User.HasClaim("Permission", "WORKORDER_CREATE") ||
-        context.User.HasClaim("Permission", "WORKORDER_CREATE_ALL") ||
-        context.User.HasClaim("Permission", "WORKORDER_CREATE_TEAM") ||
-        context.User.HasClaim("Permission", "WORKORDER_CREATE_OWN") ||
-        context.User.IsInRole("SuperAdmin") ||
-        context.User.IsInRole("Administrateur")));
+        GMAO.Application.Security.GmaoPermissions.HasPermission(
+            context.User,
+            GMAO.Application.Security.GmaoPermissions.WorkOrderCreate)));
 
     options.AddPolicy("WorkOrderUpdate", policy => policy.RequireAssertion(context =>
-        context.User.HasClaim("Permission", "WORKORDER_UPDATE") ||
-        context.User.HasClaim("Permission", "WORKORDER_UPDATE_ALL") ||
-        context.User.HasClaim("Permission", "WORKORDER_UPDATE_TEAM") ||
-        context.User.HasClaim("Permission", "WORKORDER_UPDATE_OWN") ||
-        context.User.IsInRole("SuperAdmin") ||
-        context.User.IsInRole("Administrateur")));
+        GMAO.Application.Security.GmaoPermissions.HasPermission(
+            context.User,
+            GMAO.Application.Security.GmaoPermissions.WorkOrderUpdate)));
 });
 
 // ── Controllers & API ────────────────────────────────────────────────────────
@@ -322,13 +331,172 @@ try
         Console.WriteLine($"⚠️ Direct SQL schema update warning: {sqlEx.Message}");
     }
 
-    db.Database.Migrate();
-    Console.WriteLine("✅ Database migration completed successfully.");
+    try
+    {
+        db.Database.Migrate();
+        Console.WriteLine("✅ Database migration completed successfully.");
+    }
+    catch (Exception migEx)
+    {
+        Console.WriteLine($"⚠️ Database migration failed: {migEx.Message} -> {migEx.InnerException?.Message}");
+        Console.WriteLine("Applying idempotent schema fallback and continuing...");
+    }
+
+    // Post-migration idempotent schema guard + PostgreSQL sequence synchronization
+    try
+    {
+        db.Database.ExecuteSqlRaw(@"
+            DO $$
+            DECLARE
+                seq_name text;
+                max_id bigint;
+                tbl text;
+                tables_to_sync text[] := ARRAY[
+                    'Roles', 'Societes', 'Users', 'SitesUsines', 'Localisations',
+                    'Campagnes', 'Equipements', 'DemandesIntervention', 'OrdresTravail',
+                    'Interventions', 'Pieces', 'Fournisseurs', 'MouvementsStock',
+                    'Documents', 'Equipes', 'PlansPreventifs', 'TachesPreventives',
+                    'Factures', 'PlansOffres', 'JournauxSuperAdmin', 'AuditTrailEntries'
+                ];
+            BEGIN
+                IF EXISTS (SELECT 1 FROM information_schema.columns WHERE LOWER(table_name)='campagnes' AND LOWER(column_name)='datefin' AND is_nullable='NO') THEN
+                    ALTER TABLE ""Campagnes"" ALTER COLUMN ""DateFin"" DROP NOT NULL;
+                END IF;
+
+                IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='Documents') THEN
+                    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Documents' AND column_name='BucketName') THEN
+                        ALTER TABLE ""Documents"" ADD COLUMN ""BucketName"" character varying(100) NULL;
+                    END IF;
+                    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Documents' AND column_name='IncidentId') THEN
+                        ALTER TABLE ""Documents"" ADD COLUMN ""IncidentId"" integer NULL;
+                    END IF;
+                    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Documents' AND column_name='Sha256Checksum') THEN
+                        ALTER TABLE ""Documents"" ADD COLUMN ""Sha256Checksum"" character varying(64) NULL;
+                    END IF;
+                    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Documents' AND column_name='SocieteId') THEN
+                        ALTER TABLE ""Documents"" ADD COLUMN ""SocieteId"" integer NULL;
+                    END IF;
+                    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Documents' AND column_name='StorageProvider') THEN
+                        ALTER TABLE ""Documents"" ADD COLUMN ""StorageProvider"" character varying(32) NOT NULL DEFAULT 'Local';
+                    END IF;
+                    CREATE INDEX IF NOT EXISTS ""IX_Documents_IncidentId"" ON ""Documents"" (""IncidentId"");
+                    CREATE INDEX IF NOT EXISTS ""IX_Documents_SocieteId"" ON ""Documents"" (""SocieteId"");
+                    CREATE INDEX IF NOT EXISTS ""IX_Documents_StorageProvider"" ON ""Documents"" (""StorageProvider"");
+                END IF;
+
+                CREATE TABLE IF NOT EXISTS ""AuditTrailEntries"" (
+                    ""Id"" bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                    ""UserId"" integer NULL,
+                    ""UserName"" character varying(150) NULL,
+                    ""UserRole"" character varying(80) NULL,
+                    ""SocieteId"" integer NULL,
+                    ""SocieteName"" character varying(150) NULL,
+                    ""EntityName"" character varying(100) NOT NULL,
+                    ""EntityId"" character varying(100) NOT NULL,
+                    ""Action"" character varying(40) NOT NULL,
+                    ""BusinessActionLabel"" character varying(200) NOT NULL,
+                    ""TimestampUtc"" timestamp with time zone NOT NULL,
+                    ""OldValuesJson"" text NULL,
+                    ""NewValuesJson"" text NULL,
+                    ""ChangedProperties"" character varying(1000) NULL,
+                    ""TransactionId"" character varying(64) NULL,
+                    ""CorrelationId"" character varying(128) NULL,
+                    ""Source"" character varying(64) NOT NULL,
+                    ""IpAddress"" character varying(64) NULL,
+                    ""IsCompensated"" boolean NOT NULL DEFAULT false,
+                    ""CompensatedEntryId"" bigint NULL,
+                    ""CompensatedAtUtc"" timestamp with time zone NULL,
+                    ""CompensatedByUserId"" integer NULL
+                );
+                CREATE INDEX IF NOT EXISTS ""IX_AuditTrailEntries_EntityName"" ON ""AuditTrailEntries"" (""EntityName"");
+                CREATE INDEX IF NOT EXISTS ""IX_AuditTrailEntries_SocieteId"" ON ""AuditTrailEntries"" (""SocieteId"");
+                CREATE INDEX IF NOT EXISTS ""IX_AuditTrailEntries_TimestampUtc"" ON ""AuditTrailEntries"" (""TimestampUtc"");
+                CREATE INDEX IF NOT EXISTS ""IX_AuditTrailEntries_TransactionId"" ON ""AuditTrailEntries"" (""TransactionId"");
+                CREATE INDEX IF NOT EXISTS ""IX_AuditTrailEntries_UserId"" ON ""AuditTrailEntries"" (""UserId"");
+
+                CREATE TABLE IF NOT EXISTS ""CdcEvents"" (
+                    ""Id"" bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                    ""Operation"" character varying(20) NOT NULL,
+                    ""SchemaName"" character varying(64) NOT NULL,
+                    ""TableName"" character varying(128) NOT NULL,
+                    ""RecordId"" character varying(100) NULL,
+                    ""SocieteId"" integer NULL,
+                    ""TransactionId"" character varying(64) NOT NULL,
+                    ""Lsn"" character varying(64) NOT NULL,
+                    ""CommitTimestampUtc"" timestamp with time zone NOT NULL,
+                    ""ReceivedAtUtc"" timestamp with time zone NOT NULL,
+                    ""OldValuesJson"" text NULL,
+                    ""NewValuesJson"" text NULL,
+                    ""SlotName"" character varying(128) NOT NULL,
+                    ""PublicationName"" character varying(128) NOT NULL,
+                    ""Source"" character varying(64) NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS ""IX_CdcEvents_CommitTimestampUtc"" ON ""CdcEvents"" (""CommitTimestampUtc"");
+                CREATE UNIQUE INDEX IF NOT EXISTS ""IX_CdcEvents_Lsn_TableName_Operation_RecordId"" ON ""CdcEvents"" (""Lsn"", ""TableName"", ""Operation"", ""RecordId"");
+                CREATE INDEX IF NOT EXISTS ""IX_CdcEvents_SocieteId"" ON ""CdcEvents"" (""SocieteId"");
+                CREATE INDEX IF NOT EXISTS ""IX_CdcEvents_TableName"" ON ""CdcEvents"" (""TableName"");
+                CREATE INDEX IF NOT EXISTS ""IX_CdcEvents_TransactionId"" ON ""CdcEvents"" (""TransactionId"");
+
+                CREATE TABLE IF NOT EXISTS ""CdcWorkerStates"" (
+                    ""Id"" integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                    ""SlotName"" character varying(128) NOT NULL,
+                    ""PublicationName"" character varying(128) NOT NULL,
+                    ""Status"" character varying(64) NOT NULL,
+                    ""StatusReason"" character varying(1000) NULL,
+                    ""PostgresVersion"" character varying(200) NULL,
+                    ""WalLevel"" character varying(32) NULL,
+                    ""MaxReplicationSlots"" integer NULL,
+                    ""MaxWalSenders"" integer NULL,
+                    ""SlotActive"" boolean NULL,
+                    ""LastConsumedLsn"" character varying(64) NULL,
+                    ""CurrentServerWalLsn"" character varying(64) NULL,
+                    ""ReplicationLagBytes"" bigint NULL,
+                    ""RetainedWalBytes"" bigint NULL,
+                    ""WalStatus"" character varying(32) NULL,
+                    ""TotalEventsProcessed"" bigint NOT NULL DEFAULT 0,
+                    ""LastEventAtUtc"" timestamp with time zone NULL,
+                    ""LastHeartbeatUtc"" timestamp with time zone NULL,
+                    ""UpdatedAtUtc"" timestamp with time zone NOT NULL
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS ""IX_CdcWorkerStates_SlotName"" ON ""CdcWorkerStates"" (""SlotName"");
+
+                -- Ensure essential system roles exist
+                IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='Roles') THEN
+                    INSERT INTO ""Roles"" (""Id"", ""Nom"", ""Description"") VALUES
+                        (1, 'Administrateur', 'Administrateur de la plateforme et de l''usine avec accès complet'),
+                        (2, 'Responsable Maintenance', 'Gestion des OT, validation des demandes et rapports'),
+                        (3, 'Chef d''équipe', 'Supervision des techniciens et suivi des OT'),
+                        (4, 'Technicien', 'Exécution des interventions'),
+                        (5, 'Responsable Production', 'Déclaration des pannes et validation'),
+                        (7, 'SuperAdmin', 'Administrateur global de la plateforme')
+                    ON CONFLICT (""Id"") DO NOTHING;
+                END IF;
+
+                -- Resynchronize identity/serial sequences so inserts never collide with existing rows
+                FOREACH tbl IN ARRAY tables_to_sync LOOP
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name=tbl) THEN
+                        seq_name := pg_get_serial_sequence('""' || tbl || '""', 'Id');
+                        IF seq_name IS NOT NULL THEN
+                            EXECUTE format('SELECT MAX(""Id"") FROM %I', tbl) INTO max_id;
+                            IF max_id IS NULL THEN
+                                PERFORM setval(seq_name, 1, false);
+                            ELSE
+                                PERFORM setval(seq_name, max_id, true);
+                            END IF;
+                        END IF;
+                    END IF;
+                END LOOP;
+            END $$;
+        ");
+    }
+    catch (Exception postEx)
+    {
+        Console.WriteLine($"⚠️ Post-migration schema guard warning: {postEx.Message}");
+    }
 }
 catch (Exception ex)
 {
-    Console.WriteLine($"⚠️ Database migration failed: {ex.Message} -> {ex.InnerException?.Message}");
-    Console.WriteLine("The application will continue without migration.");
+    Console.WriteLine($"⚠️ Database initialization warning: {ex.Message} -> {ex.InnerException?.Message}");
 }
 
 app.Run();

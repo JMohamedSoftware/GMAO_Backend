@@ -8,6 +8,7 @@ public class UserProfileDto
     public string Role { get; set; } = string.Empty;
     public string? TenantId { get; set; }
     public string? TenantName { get; set; }
+    public int? EquipeId { get; set; }
     public bool IsActive { get; set; }
     public string CreatedAt { get; set; } = string.Empty;
     public List<string> Permissions { get; set; } = new List<string>();

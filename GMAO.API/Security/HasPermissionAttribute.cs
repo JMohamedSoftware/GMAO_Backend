@@ -1,46 +1,35 @@
-using GMAO.Infrastructure.Data;
+using GMAO.Application.Security;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
-using Microsoft.EntityFrameworkCore;
-using System.Security.Claims;
 
 namespace GMAO.API.Security;
 
 [AttributeUsage(AttributeTargets.Method | AttributeTargets.Class, AllowMultiple = true)]
 public class HasPermissionAttribute : Attribute, IAsyncActionFilter
 {
-    private readonly string _permission;
+    private readonly string[] _permissions;
 
-    public HasPermissionAttribute(string permission)
+    public HasPermissionAttribute(params string[] permissions)
     {
-        _permission = permission;
+        _permissions = permissions ?? Array.Empty<string>();
     }
 
     public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
     {
         var user = context.HttpContext.User;
 
-        if (!user.Identity?.IsAuthenticated ?? true)
+        if (user.Identity?.IsAuthenticated != true)
         {
             context.Result = new UnauthorizedResult();
             return;
         }
 
-        // SuperAdmin and Admin can do everything
-        if (user.HasClaim(ClaimTypes.Role, "SuperAdmin") || user.IsInRole("SuperAdmin") ||
-            user.HasClaim(ClaimTypes.Role, "Admin") || user.IsInRole("Admin"))
+        if (_permissions.Length == 0 || _permissions.Any(p => GmaoPermissions.HasPermission(user, p)))
         {
             await next();
             return;
         }
 
-        var hasPermission = user.HasClaim("Permission", _permission);
-        if (!hasPermission)
-        {
-            context.Result = new ForbidResult();
-            return;
-        }
-
-        await next();
+        context.Result = new ForbidResult();
     }
 }

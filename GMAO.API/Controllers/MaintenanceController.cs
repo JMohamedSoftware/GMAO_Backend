@@ -63,10 +63,7 @@ public class MaintenanceController : ControllerBase
     {
         int societeId = GetSocieteId(context);
         int currentUserId = GetCurrentUserId();
-        var isSuperAdmin = User.IsInRole("SuperAdmin");
-        var isAdminOrCompanyAdmin = isSuperAdmin ||
-                                    User.IsInRole("Administrateur") ||
-                                    User.IsInRole("CompanyAdmin");
+        var isAdminOrCompanyAdmin = GMAO.Domain.Constants.GmaoRoles.IsCompanyAdmin(User);
 
         int? currentTeamId = null;
         if (currentUserId > 0)
@@ -136,22 +133,20 @@ public class MaintenanceController : ControllerBase
             .AsNoTracking()
             .Where(i => i.SocieteId == societeId);
 
-        bool canViewAllIncidents = isAdminOrCompanyAdmin ||
-                                   User.HasClaim("Permission", "INCIDENTS_VIEW_ALL") ||
-                                   User.HasClaim("Permission", "INCIDENTS_VIEW");
-
-        if (!canViewAllIncidents)
+        var incScope = GMAO.Application.Security.GmaoPermissions.GetScope(User, GMAO.Application.Security.GmaoPermissions.IncidentView);
+        if (incScope == GMAO.Application.Security.AccessScope.None)
         {
-            if (User.HasClaim("Permission", "INCIDENTS_VIEW_TEAM"))
-            {
-                incQuery = currentTeamId.HasValue
-                    ? incQuery.Where(i => i.DemandeurId == currentUserId || (i.Demandeur != null && i.Demandeur.EquipeId == currentTeamId.Value))
-                    : incQuery.Where(i => i.DemandeurId == currentUserId);
-            }
-            else
-            {
-                incQuery = incQuery.Where(i => i.DemandeurId == currentUserId);
-            }
+            incQuery = incQuery.Where(i => false);
+        }
+        else if (incScope == GMAO.Application.Security.AccessScope.Team)
+        {
+            incQuery = currentTeamId.HasValue
+                ? incQuery.Where(i => i.DemandeurId == currentUserId || (i.Demandeur != null && i.Demandeur.EquipeId == currentTeamId.Value))
+                : incQuery.Where(i => i.DemandeurId == currentUserId);
+        }
+        else if (incScope == GMAO.Application.Security.AccessScope.Own)
+        {
+            incQuery = incQuery.Where(i => i.DemandeurId == currentUserId);
         }
 
         var incidents = await incQuery
@@ -162,28 +157,29 @@ public class MaintenanceController : ControllerBase
         IQueryable<OrdresTravail> otQuery = context.OrdresTravail
             .AsNoTracking()
             .Include(o => o.Campagne)
+            .Include(o => o.Intervention)
+            .Include(o => o.MouvementsStock)
+                .ThenInclude(m => m.Piece)
             .Where(o => o.SocieteId == societeId);
 
-        bool canViewAllOts = isAdminOrCompanyAdmin ||
-                             User.HasClaim("Permission", "WORKORDER_VIEW_ALL") ||
-                             User.HasClaim("Permission", "WORKORDER_VIEW");
-
-        if (!canViewAllOts)
+        var otScope = GMAO.Application.Security.GmaoPermissions.GetScope(User, GMAO.Application.Security.GmaoPermissions.WorkOrderView);
+        if (otScope == GMAO.Application.Security.AccessScope.None)
         {
-            if (User.HasClaim("Permission", "WORKORDER_VIEW_TEAM"))
-            {
-                otQuery = currentTeamId.HasValue
-                    ? otQuery.Where(ot =>
-                        ot.TechnicienId == currentUserId ||
-                        ot.ResponsableId == currentUserId ||
-                        (ot.Technicien != null && ot.Technicien.EquipeId == currentTeamId.Value) ||
-                        (ot.Responsable != null && ot.Responsable.EquipeId == currentTeamId.Value))
-                    : otQuery.Where(ot => ot.TechnicienId == currentUserId || ot.ResponsableId == currentUserId);
-            }
-            else
-            {
-                otQuery = otQuery.Where(ot => ot.TechnicienId == currentUserId || ot.ResponsableId == currentUserId);
-            }
+            otQuery = otQuery.Where(ot => false);
+        }
+        else if (otScope == GMAO.Application.Security.AccessScope.Team)
+        {
+            otQuery = currentTeamId.HasValue
+                ? otQuery.Where(ot =>
+                    ot.TechnicienId == currentUserId ||
+                    ot.ResponsableId == currentUserId ||
+                    (ot.Technicien != null && ot.Technicien.EquipeId == currentTeamId.Value) ||
+                    (ot.Responsable != null && ot.Responsable.EquipeId == currentTeamId.Value))
+                : otQuery.Where(ot => ot.TechnicienId == currentUserId || ot.ResponsableId == currentUserId);
+        }
+        else if (otScope == GMAO.Application.Security.AccessScope.Own)
+        {
+            otQuery = otQuery.Where(ot => ot.TechnicienId == currentUserId || ot.ResponsableId == currentUserId);
         }
 
         var ordres = await otQuery

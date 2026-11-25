@@ -1,10 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using GMAO.Domain.Constants;
 using GMAO.Domain.Entities;
 using GMAO.Domain.Enums;
 using System.Security.Claims;
@@ -22,15 +26,18 @@ public class SuperAdminController : ControllerBase
     private readonly GmaoDbContext _db;
     private readonly IRedoLogService _redoLogService;
     private readonly IBusinessCompensationService _compensationService;
+    private readonly ILogger<SuperAdminController>? _logger;
 
     public SuperAdminController(
         GmaoDbContext db,
         IRedoLogService redoLogService,
-        IBusinessCompensationService compensationService)
+        IBusinessCompensationService compensationService,
+        ILogger<SuperAdminController>? logger = null)
     {
         _db = db;
         _redoLogService = redoLogService;
         _compensationService = compensationService;
+        _logger = logger;
     }
 
     // ───────────────────────────────────────────────────────────────────────────
@@ -114,6 +121,11 @@ public class SuperAdminController : ControllerBase
             .Select(g => new { Plan = g.Key, Count = g.Count() })
             .ToListAsync();
 
+        var pingWatch = Stopwatch.StartNew();
+        bool dbConnected = await _db.Database.CanConnectAsync();
+        pingWatch.Stop();
+        int dbPingMs = (int)pingWatch.ElapsedMilliseconds;
+
         return Ok(new
         {
             kpis = new
@@ -130,8 +142,9 @@ public class SuperAdminController : ControllerBase
                 pendingInvoicesCount,
                 trialTenantsCount,
                 renewalCount,
-                systemHealth = 99.98,
-                avgResponseTimeMs = 42
+                dbConnected,
+                systemHealth = (double?)null,
+                avgResponseTimeMs = dbConnected ? dbPingMs : (int?)null
             },
             recentLogs,
             recentTenants,
@@ -196,50 +209,54 @@ public class SuperAdminController : ControllerBase
     [HttpPost("tenants")]
     public async Task<IActionResult> CreateTenant([FromBody] Societe tenant)
     {
-        if (string.IsNullOrWhiteSpace(tenant.Nom)) return BadRequest(new { message = "Le nom de l'entreprise est obligatoire." });
-        if (string.IsNullOrWhiteSpace(tenant.CodeTenant))
-        {
-            tenant.CodeTenant = tenant.Nom.ToLower().Replace(" ", "-").Replace("'", "");
-        }
-        else
-        {
-            tenant.CodeTenant = tenant.CodeTenant.Trim().ToLower().Replace(" ", "-");
-        }
+        if (string.IsNullOrWhiteSpace(tenant.Nom))
+            return BadRequest(new { message = "Le nom de l'entreprise est obligatoire." });
 
-        // Prevent unique constraint clash
-        var baseCode = tenant.CodeTenant;
-        int counter = 1;
-        while (await _db.Societes.IgnoreQueryFilters().AnyAsync(s => s.CodeTenant == tenant.CodeTenant))
-        {
-            tenant.CodeTenant = $"{baseCode}-{counter++}";
-        }
+        tenant.Nom = tenant.Nom.Trim();
+        if (tenant.Nom.Length > 150)
+            return BadRequest(new { message = "Le nom de l'entreprise ne doit pas dépasser 150 caractères." });
 
+        if (!string.IsNullOrWhiteSpace(tenant.EmailContact) && tenant.EmailContact.Trim().Length > 150)
+            return BadRequest(new { message = "L'email de contact ne doit pas dépasser 150 caractères." });
+
+        tenant.EmailContact = tenant.EmailContact?.Trim();
+        tenant.Adresse = TruncateMax(tenant.Adresse?.Trim(), 250);
+        tenant.CodeTenant = await BuildUniqueCodeTenantAsync(tenant.CodeTenant, tenant.Nom);
         tenant.CreatedAt = DateTime.UtcNow;
         if (tenant.SubscriptionStartDate == null) tenant.SubscriptionStartDate = DateTime.UtcNow;
         if (tenant.SubscriptionEndDate == null) tenant.SubscriptionEndDate = DateTime.UtcNow.AddYears(1);
 
-        _db.Societes.Add(tenant);
-        await _db.SaveChangesAsync();
-
-        // Création automatique de la campagne principale initiale (En cours, sans date de fin fixée)
-        var currentYear = DateTime.UtcNow.Year;
-        var defaultCampagne = new Campagne
+        try
         {
-            SocieteId = tenant.Id,
-            Nom = $"Campagne {currentYear}",
-            Description = $"Campagne industrielle principale {currentYear}",
-            DateDebut = DateOnly.FromDateTime(DateTime.UtcNow),
-            DateFin = null, // Ouverte jusqu'à clôture
-            Etat = EtatCampagne.EnCours,
-            CreatedAt = DateTime.UtcNow
-        };
-        _db.Campagnes.Add(defaultCampagne);
-        await _db.SaveChangesAsync();
+            _db.Societes.Add(tenant);
+            await _db.SaveChangesAsync();
 
-        // Log audit
-        await LogAuditAsync("Création Entreprise", "Tenant", $"Nouvelle entreprise enregistrée: {tenant.Nom} ({tenant.SubscriptionPlan})");
+            // Création automatique de la campagne principale initiale (En cours, sans date de fin fixée)
+            var currentYear = DateTime.UtcNow.Year;
+            var defaultCampagne = new Campagne
+            {
+                SocieteId = tenant.Id,
+                Nom = TruncateMax($"Campagne {currentYear}", 150)!,
+                Description = TruncateMax($"Campagne industrielle principale {currentYear}", 500),
+                DateDebut = DateOnly.FromDateTime(DateTime.UtcNow),
+                DateFin = null, // Ouverte jusqu'à clôture
+                Etat = EtatCampagne.EnCours,
+                CreatedAt = DateTime.UtcNow
+            };
+            _db.Campagnes.Add(defaultCampagne);
+            await _db.SaveChangesAsync();
 
-        return CreatedAtAction(nameof(GetTenantById), new { id = tenant.Id }, tenant);
+            // Log audit
+            await LogAuditAsync("Création Entreprise", "Tenant", $"Nouvelle entreprise enregistrée: {tenant.Nom} ({tenant.SubscriptionPlan})");
+
+            return CreatedAtAction(nameof(GetTenantById), new { id = tenant.Id }, tenant);
+        }
+        catch (Exception ex)
+        {
+            var rootMsg = ExtractRootErrorMessage(ex);
+            _logger?.LogError(ex, "Erreur lors de la création de l'entreprise {Nom}: {RootError}", tenant.Nom, rootMsg);
+            return BadRequest(new { message = $"Erreur lors de la création : {rootMsg}" });
+        }
     }
 
     [HttpPost("tenants-with-admin")]
@@ -248,24 +265,21 @@ public class SuperAdminController : ControllerBase
         if (string.IsNullOrWhiteSpace(dto.Nom))
             return BadRequest(new { message = "Le nom de l'entreprise est obligatoire." });
 
-        var code = string.IsNullOrWhiteSpace(dto.CodeTenant)
-            ? dto.Nom.ToLower().Replace(" ", "-").Replace("'", "")
-            : dto.CodeTenant.Trim().ToLower().Replace(" ", "-");
+        var nomTrimmed = dto.Nom.Trim();
+        if (nomTrimmed.Length > 150)
+            return BadRequest(new { message = "Le nom de l'entreprise ne doit pas dépasser 150 caractères." });
 
-        var cleanCode = System.Text.RegularExpressions.Regex.Replace(code, @"[^a-z0-9\-]", "");
-        if (string.IsNullOrWhiteSpace(cleanCode)) cleanCode = $"tenant-{DateTime.UtcNow.Ticks % 100000}";
-
-        var baseCode = cleanCode;
-        int counter = 1;
-        while (await _db.Societes.IgnoreQueryFilters().AnyAsync(s => s.CodeTenant == cleanCode))
-        {
-            cleanCode = $"{baseCode}-{counter++}";
-        }
+        var emailContactTrimmed = string.IsNullOrWhiteSpace(dto.EmailContact) ? null : dto.EmailContact.Trim();
+        if (emailContactTrimmed != null && emailContactTrimmed.Length > 150)
+            return BadRequest(new { message = "L'email de contact ne doit pas dépasser 150 caractères." });
 
         string? adminEmailNorm = null;
         if (!string.IsNullOrWhiteSpace(dto.AdminEmail))
         {
             adminEmailNorm = dto.AdminEmail.Trim().ToLower();
+            if (adminEmailNorm.Length > 150)
+                return BadRequest(new { message = "L'email de l'administrateur ne doit pas dépasser 150 caractères." });
+
             var existingUser = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Email.ToLower() == adminEmailNorm);
             if (existingUser != null)
             {
@@ -273,20 +287,37 @@ public class SuperAdminController : ControllerBase
             }
         }
 
+        if (!string.IsNullOrWhiteSpace(dto.AdminNom) && dto.AdminNom.Trim().Length > 100)
+            return BadRequest(new { message = "Le nom de l'administrateur ne doit pas dépasser 100 caractères." });
+
+        if (!string.IsNullOrWhiteSpace(dto.AdminPrenom) && dto.AdminPrenom.Trim().Length > 100)
+            return BadRequest(new { message = "Le prénom de l'administrateur ne doit pas dépasser 100 caractères." });
+
+        var rawAdminPhone = !string.IsNullOrWhiteSpace(dto.AdminTelephone) ? dto.AdminTelephone.Trim()
+            : (!string.IsNullOrWhiteSpace(dto.Telephone) ? dto.Telephone.Trim() : null);
+        if (rawAdminPhone != null && rawAdminPhone.Length > 20)
+            return BadRequest(new { message = "Le numéro de téléphone ne doit pas dépasser 20 caractères." });
+
+        var cleanCode = await BuildUniqueCodeTenantAsync(dto.CodeTenant, nomTrimmed);
+
         using var tx = await _db.Database.BeginTransactionAsync();
         try
         {
+            var ville = string.IsNullOrWhiteSpace(dto.Ville) ? "Nabeul" : dto.Ville.Trim();
+            var gouvernorat = string.IsNullOrWhiteSpace(dto.Gouvernorat) ? "Tunisie" : dto.Gouvernorat.Trim();
+            var rawAdresse = string.IsNullOrWhiteSpace(dto.Adresse) ? $"{ville}, {gouvernorat}" : dto.Adresse.Trim();
+
             var tenant = new Societe
             {
-                Nom = dto.Nom.Trim(),
+                Nom = nomTrimmed,
                 CodeTenant = cleanCode,
                 Category = dto.Category ?? "Agroalimentaire & Transformation",
                 ManagerNom = dto.ManagerNom ?? $"{dto.AdminPrenom} {dto.AdminNom}".Trim(),
-                Telephone = dto.Telephone ?? dto.AdminTelephone,
-                Ville = dto.Ville ?? "Nabeul",
-                Gouvernorat = dto.Gouvernorat ?? "Tunisie",
-                Adresse = dto.Adresse ?? $"{dto.Ville}, {dto.Gouvernorat}",
-                EmailContact = dto.EmailContact ?? adminEmailNorm,
+                Telephone = dto.Telephone?.Trim() ?? dto.AdminTelephone?.Trim(),
+                Ville = ville,
+                Gouvernorat = gouvernorat,
+                Adresse = TruncateMax(rawAdresse, 250),
+                EmailContact = TruncateMax(emailContactTrimmed ?? adminEmailNorm, 150),
                 SubscriptionPlan = dto.SubscriptionPlan ?? "Basic",
                 SubscriptionStatus = dto.SubscriptionStatus ?? "Actif",
                 SubscriptionAmount = dto.SubscriptionAmount,
@@ -307,14 +338,24 @@ public class SuperAdminController : ControllerBase
             User? adminUser = null;
             if (!string.IsNullOrWhiteSpace(adminEmailNorm))
             {
+                var adminRoleExists = await _db.Roles.AnyAsync(r => r.Id == 1);
+                if (!adminRoleExists)
+                {
+                    return BadRequest(new { message = "Erreur de configuration système : le rôle 'Administrateur' (ID 1) est introuvable en base de données." });
+                }
+
                 var rawPassword = !string.IsNullOrWhiteSpace(dto.AdminPassword) ? dto.AdminPassword : "Gmao2026!";
                 adminUser = new User
                 {
-                    Nom = !string.IsNullOrWhiteSpace(dto.AdminNom) ? dto.AdminNom.Trim() : dto.Nom.Trim(),
-                    Prenom = !string.IsNullOrWhiteSpace(dto.AdminPrenom) ? dto.AdminPrenom.Trim() : "Admin",
+                    Nom = !string.IsNullOrWhiteSpace(dto.AdminNom)
+                        ? TruncateMax(dto.AdminNom.Trim(), 100)!
+                        : TruncateMax(nomTrimmed, 100)!,
+                    Prenom = !string.IsNullOrWhiteSpace(dto.AdminPrenom)
+                        ? TruncateMax(dto.AdminPrenom.Trim(), 100)!
+                        : "Admin",
                     Email = adminEmailNorm,
                     PasswordHash = PasswordHasher.HashPassword(rawPassword),
-                    Telephone = dto.AdminTelephone ?? dto.Telephone,
+                    Telephone = TruncateMax(rawAdminPhone, 20),
                     RoleId = 1, // Administrateur d'entreprise
                     SocieteId = tenant.Id,
                     IsActive = true,
@@ -347,8 +388,8 @@ public class SuperAdminController : ControllerBase
             var defaultLoc = new Localisation
             {
                 SocieteId = tenant.Id,
-                Nom = $"Usine {tenant.Nom}",
-                Description = $"Site et usine principale de {tenant.Nom}",
+                Nom = TruncateMax($"Usine {tenant.Nom}", 150)!,
+                Description = TruncateMax($"Site et usine principale de {tenant.Nom}", 400),
                 ParentId = null
             };
             _db.Localisations.Add(defaultLoc);
@@ -359,8 +400,8 @@ public class SuperAdminController : ControllerBase
             var defaultCampagne = new Campagne
             {
                 SocieteId = tenant.Id,
-                Nom = $"Campagne {currentYear}",
-                Description = $"Campagne industrielle principale {currentYear}",
+                Nom = TruncateMax($"Campagne {currentYear}", 150)!,
+                Description = TruncateMax($"Campagne industrielle principale {currentYear}", 500),
                 DateDebut = DateOnly.FromDateTime(DateTime.UtcNow),
                 DateFin = null, // Ouverte jusqu'à clôture
                 Etat = EtatCampagne.EnCours,
@@ -403,7 +444,9 @@ public class SuperAdminController : ControllerBase
         catch (Exception ex)
         {
             await tx.RollbackAsync();
-            return BadRequest(new { message = $"Erreur lors de la création : {ex.Message}" });
+            var rootMsg = ExtractRootErrorMessage(ex);
+            _logger?.LogError(ex, "Erreur lors de la création de l'entreprise {Nom}: {RootError}", nomTrimmed, rootMsg);
+            return BadRequest(new { message = $"Erreur lors de la création : {rootMsg}" });
         }
     }
 
@@ -638,20 +681,36 @@ public class SuperAdminController : ControllerBase
     {
         await EnsureSeedDataAsync();
 
+        var now = DateTime.UtcNow;
+        var monthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+
         var tenants = await _db.Societes.IgnoreQueryFilters()
             .OrderByDescending(s => s.SubscriptionAmount)
             .Select(s => new
             {
                 TenantId = s.Id,
                 TenantNom = s.Nom,
+                s.CodeTenant,
                 s.Category,
+                s.ManagerNom,
+                s.EmailContact,
                 Plan = s.SubscriptionPlan,
                 Status = s.SubscriptionStatus,
                 Amount = s.SubscriptionAmount,
                 StartDate = s.SubscriptionStartDate,
                 RenewalDate = s.SubscriptionEndDate,
-                PaymentMethod = "Virement bancaire",
-                AutoRenew = true
+                DaysLeft = s.SubscriptionEndDate.HasValue
+                    ? (int?)Math.Max(0, (int)Math.Ceiling((s.SubscriptionEndDate.Value - now).TotalDays))
+                    : null,
+                SitesCount = _db.SitesUsines.IgnoreQueryFilters().Count(st => st.SocieteId == s.Id),
+                s.MaxSites,
+                UsersCount = _db.Users.IgnoreQueryFilters().Count(u => u.SocieteId == s.Id && u.IsActive && u.RoleId != GmaoRoles.SuperAdminId),
+                s.MaxUsers,
+                EquipementsCount = _db.Equipements.IgnoreQueryFilters().Count(e => e.SocieteId == s.Id),
+                s.MaxEquipements,
+                MonthlyOtCount = _db.OrdresTravail.IgnoreQueryFilters().Count(o => o.SocieteId == s.Id && o.DateCreation >= monthStart),
+                PaymentMethod = (string?)null,
+                AutoRenew = (bool?)null
             })
             .ToListAsync();
 
@@ -710,7 +769,7 @@ public class SuperAdminController : ControllerBase
                 u.Avatar,
                 u.IsActive,
                 u.CreatedAt,
-                LastLogin = DateTime.UtcNow.AddMinutes(-new Random(u.Id).Next(15, 4320))
+                LastLogin = (DateTime?)null
             })
             .ToListAsync();
 
@@ -724,23 +783,52 @@ public class SuperAdminController : ControllerBase
         if (string.IsNullOrWhiteSpace(dto.Nom)) return BadRequest(new { message = "Le nom est requis." });
 
         var emailNorm = dto.Email.Trim().ToLower();
+        var nomTrim = dto.Nom.Trim();
+        var prenomTrim = (dto.Prenom ?? "").Trim();
+        var phoneTrim = string.IsNullOrWhiteSpace(dto.Telephone) ? null : dto.Telephone.Trim();
+
+        if (emailNorm.Length > 150) return BadRequest(new { message = "L'adresse email ne doit pas dépasser 150 caractères." });
+        if (nomTrim.Length > 100) return BadRequest(new { message = "Le nom ne doit pas dépasser 100 caractères." });
+        if (prenomTrim.Length > 100) return BadRequest(new { message = "Le prénom ne doit pas dépasser 100 caractères." });
+        if (phoneTrim != null && phoneTrim.Length > 20) return BadRequest(new { message = "Le numéro de téléphone ne doit pas dépasser 20 caractères." });
+
         var existing = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Email.ToLower() == emailNorm);
         if (existing != null)
         {
             return BadRequest(new { message = $"L'adresse email '{dto.Email}' est déjà utilisée par un autre compte." });
         }
 
+        var roleId = dto.RoleId > 0 ? dto.RoleId : 1;
+        if (!await _db.Roles.AnyAsync(r => r.Id == roleId))
+            return BadRequest(new { message = $"Le rôle sélectionné (ID {roleId}) n'existe pas." });
+
+        int? societeId = dto.SocieteId > 0 ? dto.SocieteId : null;
+        if (societeId.HasValue)
+        {
+            var tenant = await _db.Societes.IgnoreQueryFilters().FirstOrDefaultAsync(s => s.Id == societeId.Value);
+            if (tenant == null)
+                return BadRequest(new { message = $"L'entreprise sélectionnée (ID {societeId.Value}) n'existe pas." });
+
+            if (dto.IsActive && tenant.MaxUsers > 0)
+            {
+                var activeUsersCount = await _db.Users.IgnoreQueryFilters()
+                    .CountAsync(u => u.SocieteId == societeId.Value && u.IsActive && u.RoleId != GmaoRoles.SuperAdminId);
+                if (activeUsersCount >= tenant.MaxUsers)
+                    return BadRequest(new { message = $"Quota maximum d'utilisateurs atteint ({activeUsersCount}/{tenant.MaxUsers}) pour {tenant.Nom}." });
+            }
+        }
+
         var rawPassword = !string.IsNullOrWhiteSpace(dto.Password) ? dto.Password : "Gmao2026!";
 
         var user = new User
         {
-            Nom = dto.Nom.Trim(),
-            Prenom = (dto.Prenom ?? "").Trim(),
+            Nom = nomTrim,
+            Prenom = prenomTrim,
             Email = emailNorm,
             PasswordHash = PasswordHasher.HashPassword(rawPassword),
-            Telephone = dto.Telephone,
-            RoleId = dto.RoleId > 0 ? dto.RoleId : 1,
-            SocieteId = dto.SocieteId > 0 ? dto.SocieteId : null,
+            Telephone = phoneTrim,
+            RoleId = roleId,
+            SocieteId = societeId,
             IsActive = dto.IsActive,
             CreatedAt = DateTime.UtcNow
         };
@@ -761,6 +849,7 @@ public class SuperAdminController : ControllerBase
         if (!string.IsNullOrWhiteSpace(dto.Email))
         {
             var emailNorm = dto.Email.Trim().ToLower();
+            if (emailNorm.Length > 150) return BadRequest(new { message = "L'adresse email ne doit pas dépasser 150 caractères." });
             if (emailNorm != user.Email.ToLower())
             {
                 var existing = await _db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id != id && u.Email.ToLower() == emailNorm);
@@ -772,11 +861,31 @@ public class SuperAdminController : ControllerBase
             }
         }
 
+        if (!string.IsNullOrWhiteSpace(dto.Nom) && dto.Nom.Trim().Length > 100)
+            return BadRequest(new { message = "Le nom ne doit pas dépasser 100 caractères." });
+        if (!string.IsNullOrWhiteSpace(dto.Prenom) && dto.Prenom.Trim().Length > 100)
+            return BadRequest(new { message = "Le prénom ne doit pas dépasser 100 caractères." });
+        if (!string.IsNullOrWhiteSpace(dto.Telephone) && dto.Telephone.Trim().Length > 20)
+            return BadRequest(new { message = "Le numéro de téléphone ne doit pas dépasser 20 caractères." });
+
+        if (dto.RoleId > 0)
+        {
+            if (!await _db.Roles.AnyAsync(r => r.Id == dto.RoleId))
+                return BadRequest(new { message = $"Le rôle sélectionné (ID {dto.RoleId}) n'existe pas." });
+            user.RoleId = dto.RoleId;
+        }
+
+        if (dto.SocieteId.HasValue)
+        {
+            int? targetSocId = dto.SocieteId.Value > 0 ? dto.SocieteId.Value : null;
+            if (targetSocId.HasValue && !await _db.Societes.IgnoreQueryFilters().AnyAsync(s => s.Id == targetSocId.Value))
+                return BadRequest(new { message = $"L'entreprise sélectionnée (ID {targetSocId.Value}) n'existe pas." });
+            user.SocieteId = targetSocId;
+        }
+
         user.Nom = dto.Nom?.Trim() ?? user.Nom;
         user.Prenom = dto.Prenom?.Trim() ?? user.Prenom;
-        user.Telephone = dto.Telephone ?? user.Telephone;
-        if (dto.RoleId > 0) user.RoleId = dto.RoleId;
-        if (dto.SocieteId.HasValue) user.SocieteId = dto.SocieteId.Value > 0 ? dto.SocieteId.Value : null;
+        user.Telephone = dto.Telephone != null ? (string.IsNullOrWhiteSpace(dto.Telephone) ? null : dto.Telephone.Trim()) : user.Telephone;
         user.IsActive = dto.IsActive;
         if (!string.IsNullOrWhiteSpace(dto.Password))
         {
@@ -962,33 +1071,74 @@ public class SuperAdminController : ControllerBase
             })
             .ToListAsync();
 
-        var rnd = new Random();
-        var cpuPercent = rnd.Next(28, 48);
-        var ramPercent = rnd.Next(52, 68);
-        var diskPercent = 38.4;
-        var activeDbConnections = rnd.Next(14, 26);
-        var apiLatencyMs = rnd.Next(38, 55);
+        var sw = Stopwatch.StartNew();
+        bool canConnect = await _db.Database.CanConnectAsync();
+        sw.Stop();
+        int? apiLatencyMs = canConnect ? (int)sw.ElapsedMilliseconds : null;
+
+        int? activeDbConnections = null;
+        string? databaseVersion = _db.Database.IsNpgsql() ? "PostgreSQL" : _db.Database.ProviderName;
+
+        if (canConnect && _db.Database.IsNpgsql())
+        {
+            try
+            {
+                await using var conn = _db.Database.GetDbConnection();
+                if (conn.State != System.Data.ConnectionState.Open)
+                    await conn.OpenAsync();
+
+                await using (var verCmd = conn.CreateCommand())
+                {
+                    verCmd.CommandText = "SELECT version()";
+                    var verObj = await verCmd.ExecuteScalarAsync();
+                    var rawVer = verObj?.ToString();
+                    if (!string.IsNullOrWhiteSpace(rawVer))
+                        databaseVersion = string.Join(" ", rawVer.Split(' ').Take(2));
+                }
+
+                await using (var actCmd = conn.CreateCommand())
+                {
+                    actCmd.CommandText = "SELECT count(*)::int FROM pg_stat_activity WHERE datname = current_database()";
+                    var countObj = await actCmd.ExecuteScalarAsync();
+                    if (countObj != null && int.TryParse(countObj.ToString(), out int cnt))
+                        activeDbConnections = cnt;
+                }
+            }
+            catch
+            {
+                // Conserver null si pg_stat_activity non accessible sous pooler restreint
+            }
+        }
+
+        var proc = Process.GetCurrentProcess();
+        double processRamMb = Math.Round(proc.WorkingSet64 / (1024.0 * 1024.0), 1);
+        var uptimeSpan = DateTime.UtcNow - proc.StartTime.ToUniversalTime();
+        string uptimeStr = uptimeSpan.TotalDays >= 1
+            ? $"{(int)uptimeSpan.TotalDays}j {uptimeSpan.Hours}h {uptimeSpan.Minutes}m"
+            : $"{uptimeSpan.Hours}h {uptimeSpan.Minutes}m";
 
         return Ok(new
         {
             server = new
             {
-                hostname = "gmao-prod-cluster-01.tn",
-                os = "Linux Ubuntu 22.04 LTS (x86_64)",
-                dotnetVersion = ".NET 8.0.420 / Npgsql 8.0",
-                database = "PostgreSQL 16.2 (Managed Cluster)",
-                uptime = "99.98% (48 jours, 14 heures sans interruption)",
-                cpuPercent,
-                ramPercent,
-                ramUsedGb = 5.4,
-                ramTotalGb = 8.0,
-                diskPercent,
-                diskUsedGb = 38.4,
-                diskTotalGb = 100.0,
+                hostname = Environment.MachineName,
+                os = RuntimeInformation.OSDescription,
+                dotnetVersion = RuntimeInformation.FrameworkDescription,
+                database = databaseVersion,
+                uptime = uptimeStr,
+                processRamMb,
+                processorCount = Environment.ProcessorCount,
+                cpuPercent = (double?)null,
+                ramPercent = (double?)null,
+                ramUsedGb = Math.Round(processRamMb / 1024.0, 2),
+                ramTotalGb = (double?)null,
+                diskPercent = (double?)null,
+                diskUsedGb = (double?)null,
+                diskTotalGb = (double?)null,
                 activeDbConnections,
                 apiLatencyMs,
-                requestsPerMin = rnd.Next(820, 1150),
-                errorRate = 0.04
+                requestsPerMin = (int?)null,
+                errorRate = (double?)null
             },
             tenants
         });
@@ -1073,31 +1223,15 @@ public class SuperAdminController : ControllerBase
 
         var dbLogs = await query.OrderByDescending(j => j.DateHeure).Take(200).ToListAsync();
 
-        var enriched = dbLogs.Select(j => {
-            var act = j.Action.ToLower();
-            var method = (act.Contains("création") || act.Contains("ajout") || act.Contains("connexion") || act.Contains("rollback")) ? "POST"
-                : (act.Contains("modification") || act.Contains("mise à jour") || act.Contains("mise à niveau")) ? "PUT"
-                : (act.Contains("suppression") || act.Contains("purge")) ? "DELETE"
-                : "GET";
-
-            var endpoint = act.Contains("connexion") || act.Contains("auth") ? "/api/v1/auth/session"
-                : act.Contains("utilisateur") || act.Contains("user") ? "/api/v1/iam/users"
-                : act.Contains("plan") || act.Contains("abonnement") ? "/api/v1/billing/contracts"
-                : act.Contains("site") || act.Contains("usine") ? "/api/v1/topology/sites"
-                : act.Contains("rollback") ? "/api/v1/audit/rollback"
-                : act.Contains("quota") || act.Contains("limite") ? "/api/v1/tenants/limits"
-                : act.Contains("ot") || act.Contains("ordre") ? "/api/v1/workorders"
-                : act.Contains("incident") ? "/api/v1/incidents"
-                : "/api/v1/admin/audit";
-
+        var enriched = dbLogs.Select(j =>
+        {
             var statusCode = j.Statut == "Échec" ? 403 : (j.Niveau == "ERROR" ? 500 : 200);
-            var latencyMs = 15 + (Math.Abs(j.Id * 11) % 48);
 
             return new
             {
                 j.Id,
                 id = $"log-{j.Id:D4}",
-                traceId = $"trc_{j.Id:D5}_{Math.Abs(j.DateHeure.GetHashCode()):x6}",
+                traceId = $"audit-{j.Id}",
                 dateTime = j.DateHeure.ToString("yyyy-MM-dd HH:mm:ss"),
                 userName = j.UserNom,
                 userRole = j.UserRole,
@@ -1106,14 +1240,25 @@ public class SuperAdminController : ControllerBase
                 niveau = j.Niveau,
                 categorie = j.Categorie,
                 status = j.Statut,
-                ipAddress = string.IsNullOrEmpty(j.AdresseIp) ? "197.203.10.45" : j.AdresseIp,
-                browser = string.IsNullOrEmpty(j.Navigateur) ? "Chrome 122.0 (Windows NT 10.0; Win64)" : j.Navigateur,
+                ipAddress = string.IsNullOrWhiteSpace(j.AdresseIp) ? null : j.AdresseIp,
+                browser = string.IsNullOrWhiteSpace(j.Navigateur) ? null : j.Navigateur,
                 details = j.Details,
-                endpoint = endpoint,
-                httpMethod = method,
-                statusCode = statusCode,
-                latencyMs = latencyMs,
-                payloadJson = $"{{\n  \"traceId\": \"trc_{j.Id:D5}\",\n  \"event\": \"{j.Action}\",\n  \"actor\": {{\n    \"userId\": {j.UserId ?? 1},\n    \"name\": \"{j.UserNom}\",\n    \"role\": \"{j.UserRole}\"\n  }},\n  \"tenant\": \"{j.SocieteNom}\",\n  \"network\": {{\n    \"ip\": \"{j.AdresseIp}\",\n    \"userAgent\": \"{j.Navigateur}\"\n  }},\n  \"http\": {{\n    \"method\": \"{method}\",\n    \"endpoint\": \"{endpoint}\",\n    \"status\": {statusCode},\n    \"latencyMs\": {latencyMs}\n  }},\n  \"timestamp\": \"{j.DateHeure:O}\",\n  \"details\": \"{j.Details.Replace("\"", "\\\"")}\"\n}}"
+                endpoint = (string?)null,
+                httpMethod = (string?)null,
+                statusCode,
+                latencyMs = (int?)null,
+                payloadJson = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    id = j.Id,
+                    @event = j.Action,
+                    category = j.Categorie,
+                    level = j.Niveau,
+                    actor = new { userId = j.UserId, name = j.UserNom, role = j.UserRole },
+                    tenant = j.SocieteNom,
+                    network = new { ip = j.AdresseIp, userAgent = j.Navigateur },
+                    timestamp = j.DateHeure.ToString("O"),
+                    details = j.Details
+                }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true })
             };
         });
 
@@ -1137,26 +1282,68 @@ public class SuperAdminController : ControllerBase
     {
         await EnsureSeedDataAsync();
 
-        var query = from c in _db.Campagnes.IgnoreQueryFilters()
-                    join s in _db.Societes.IgnoreQueryFilters() on c.SocieteId equals s.Id into sj
-                    from s in sj.DefaultIfEmpty()
-                    select new
-                    {
-                        c.Id,
-                        c.Nom,
-                        c.Description,
-                        DateDebut = c.DateDebut.ToString("yyyy-MM-dd"),
-                        DateFin = c.DateFin.HasValue ? c.DateFin.Value.ToString("yyyy-MM-dd") : null,
-                        Etat = c.Etat.ToString(),
-                        c.SocieteId,
-                        SocieteNom = s != null ? s.Nom : "Usine Non Assignée",
-                        SocieteCode = s != null ? s.CodeTenant : $"tenant-{c.SocieteId}",
-                        OtCount = _db.OrdresTravail.IgnoreQueryFilters().Count(ot => ot.CampagneId == c.Id || (ot.Campagne != null && ot.Campagne.Nom == c.Nom)),
-                        IncidentsCount = _db.DemandesIntervention.IgnoreQueryFilters().Count(di => di.SocieteId == c.SocieteId),
-                        TonnagePrevu = (s != null ? s.CapacityTonsPerDay : 450) * (c.Etat == EtatCampagne.EnCours ? 90 : 80)
-                    };
+        var rawCampaigns = await (
+            from c in _db.Campagnes.IgnoreQueryFilters()
+            join s in _db.Societes.IgnoreQueryFilters() on c.SocieteId equals s.Id into sj
+            from s in sj.DefaultIfEmpty()
+            orderby c.DateDebut descending
+            select new
+            {
+                c.Id,
+                c.Nom,
+                c.Description,
+                c.DateDebut,
+                c.DateFin,
+                c.Etat,
+                c.SocieteId,
+                SocieteNom = s != null ? s.Nom : "Usine Non Assignée",
+                SocieteCode = s != null ? s.CodeTenant : $"tenant-{c.SocieteId}",
+                CapacityTonsPerDay = s != null ? (int?)s.CapacityTonsPerDay : null
+            }).ToListAsync();
 
-        var campaigns = await query.OrderByDescending(c => c.DateDebut).ToListAsync();
+        var campaignIds = rawCampaigns.Select(c => c.Id).ToList();
+        var otCountsByCampaign = await _db.OrdresTravail.IgnoreQueryFilters()
+            .Where(ot => ot.CampagneId.HasValue && campaignIds.Contains(ot.CampagneId.Value))
+            .GroupBy(ot => new { ot.CampagneId, ot.SocieteId })
+            .Select(g => new { CampagneId = g.Key.CampagneId!.Value, g.Key.SocieteId, Count = g.Count() })
+            .ToListAsync();
+
+        var incidentDatesByTenant = await _db.DemandesIntervention.IgnoreQueryFilters()
+            .Select(di => new { di.SocieteId, di.DatePanne })
+            .ToListAsync();
+
+        var campaigns = rawCampaigns.Select(c =>
+        {
+            var debutUtc = c.DateDebut.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            var finUtc = c.DateFin?.ToDateTime(new TimeOnly(23, 59, 59), DateTimeKind.Utc);
+
+            var otCount = otCountsByCampaign
+                .Where(x => x.CampagneId == c.Id && x.SocieteId == c.SocieteId)
+                .Sum(x => x.Count);
+
+            var incCount = incidentDatesByTenant.Count(di =>
+                di.SocieteId == c.SocieteId &&
+                di.DatePanne >= debutUtc &&
+                (!finUtc.HasValue || di.DatePanne <= finUtc.Value));
+
+            return new
+            {
+                c.Id,
+                c.Nom,
+                c.Description,
+                DateDebut = c.DateDebut.ToString("yyyy-MM-dd"),
+                DateFin = c.DateFin.HasValue ? c.DateFin.Value.ToString("yyyy-MM-dd") : null,
+                Etat = c.Etat.ToString(),
+                c.SocieteId,
+                c.SocieteNom,
+                c.SocieteCode,
+                OtCount = otCount,
+                IncidentsCount = incCount,
+                c.CapacityTonsPerDay,
+                TonnagePrevu = (int?)null
+            };
+        }).ToList();
+
         return Ok(campaigns);
     }
 
@@ -1327,6 +1514,52 @@ public class SuperAdminController : ControllerBase
     // ───────────────────────────────────────────────────────────────────────────
     // HELPER METHODS & SEEDING
     // ───────────────────────────────────────────────────────────────────────────
+    private async Task<string> BuildUniqueCodeTenantAsync(string? rawCode, string fallbackName)
+    {
+        var source = string.IsNullOrWhiteSpace(rawCode) ? fallbackName : rawCode;
+        var normalized = source.Trim().ToLowerInvariant().Replace(" ", "-").Replace("'", "");
+        var cleanCode = System.Text.RegularExpressions.Regex.Replace(normalized, @"[^a-z0-9\-]", "").Trim('-');
+
+        if (string.IsNullOrWhiteSpace(cleanCode))
+            cleanCode = $"tenant-{DateTime.UtcNow.Ticks % 100000}";
+
+        var baseCode = TruncateMax(cleanCode, 50)!;
+        var candidate = baseCode;
+        int counter = 1;
+
+        while (await _db.Societes.IgnoreQueryFilters().AnyAsync(s => s.CodeTenant == candidate))
+        {
+            var suffix = $"-{counter++}";
+            var prefix = TruncateMax(baseCode, 50 - suffix.Length) ?? "tenant";
+            candidate = $"{prefix}{suffix}";
+        }
+
+        return candidate;
+    }
+
+    private static string? TruncateMax(string? value, int maxLength)
+    {
+        if (value == null) return null;
+        return value.Length <= maxLength ? value : value[..maxLength];
+    }
+
+    private static string ExtractRootErrorMessage(Exception ex)
+    {
+        var current = ex;
+        while (current.InnerException != null)
+            current = current.InnerException;
+
+        var detailProp = current.GetType().GetProperty("Detail")?.GetValue(current) as string;
+        var constraintProp = current.GetType().GetProperty("ConstraintName")?.GetValue(current) as string;
+
+        if (!string.IsNullOrWhiteSpace(detailProp))
+            return $"{current.Message} ({detailProp})";
+        if (!string.IsNullOrWhiteSpace(constraintProp))
+            return $"{current.Message} [Constraint: {constraintProp}]";
+
+        return current.Message;
+    }
+
     private async Task LogAuditAsync(string action, string categorie, string details)
     {
         try

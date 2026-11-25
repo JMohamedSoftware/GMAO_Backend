@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace GMAO.Domain.Entities;
 
 public class User
@@ -6,6 +8,7 @@ public class User
     public string Nom { get; set; } = string.Empty;
     public string Prenom { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
+    [JsonIgnore]
     public string PasswordHash { get; set; } = string.Empty;
     public string? Telephone { get; set; }
     public int RoleId { get; set; }

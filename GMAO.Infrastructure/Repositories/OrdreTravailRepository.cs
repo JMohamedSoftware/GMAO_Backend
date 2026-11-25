@@ -1,4 +1,6 @@
-using System.Threading.Tasks;
+using System.Security.Claims;
+using GMAO.Application.Security;
+using GMAO.Domain.Constants;
 using GMAO.Domain.Entities;
 using GMAO.Domain.Interfaces;
 using GMAO.Infrastructure.Data;
@@ -14,65 +16,65 @@ public class OrdreTravailRepository : GenericRepository<OrdresTravail>, IOrdreTr
 
     public async Task<OrdresTravail?> GetByNumeroAsync(string numeroOT)
     {
-        // Squelette à implémenter étape par étape
-        throw new System.NotImplementedException();
+        if (string.IsNullOrWhiteSpace(numeroOT))
+            return null;
+
+        var normalized = numeroOT.Trim();
+        return await _context.Set<OrdresTravail>()
+            .AsNoTracking()
+            .Include(o => o.Equipement)
+            .Include(o => o.Technicien)
+            .Include(o => o.Intervention)
+            .FirstOrDefaultAsync(o => o.NumeroOT == normalized);
     }
 
-    public async Task<System.Collections.Generic.IEnumerable<OrdresTravail>> GetAllForUserAsync(System.Security.Claims.ClaimsPrincipal user)
+    public async Task<IEnumerable<OrdresTravail>> GetAllForUserAsync(ClaimsPrincipal user)
     {
-        var query = _context.Set<OrdresTravail>().AsQueryable();
+        var query = _context.Set<OrdresTravail>()
+            .AsNoTracking()
+            .Include(o => o.Campagne)
+            .Include(o => o.Technicien)
+            .Include(o => o.Intervention)
+            .AsQueryable();
 
-        // Enforce Row-Level Security using Scoped Permissions
-        if (user.HasClaim(System.Security.Claims.ClaimTypes.Role, "SuperAdmin") || 
-            user.HasClaim(System.Security.Claims.ClaimTypes.Role, "Administrateur") ||
-            user.HasClaim(System.Security.Claims.ClaimTypes.Role, "CompanyAdmin"))
-        {
+        if (GmaoRoles.IsCompanyAdmin(user))
             return await query.ToListAsync();
-        }
 
-        var userIdString = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var scope = GmaoPermissions.GetScope(user, GmaoPermissions.WorkOrderView);
+        if (scope == AccessScope.All)
+            return await query.ToListAsync();
+
+        var userIdString = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         if (!int.TryParse(userIdString, out var userId))
-        {
-            // Unauthenticated or invalid user ID gets nothing
-            return new System.Collections.Generic.List<OrdresTravail>();
-        }
+            return new List<OrdresTravail>();
 
-        // Get current user's team if any
-        int? userEquipeId = null;
-        var currentUserEntity = await _context.Set<User>().FindAsync(userId);
-        if (currentUserEntity != null) userEquipeId = currentUserEntity.EquipeId;
+        if (scope == AccessScope.Team)
+        {
+            var currentUserEntity = await _context.Set<User>().AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId);
+            int? userEquipeId = currentUserEntity?.EquipeId;
 
-        // Check for specific scopes
-        if (user.HasClaim("Permission", "WORKORDER_VIEW_ALL") || user.HasClaim("Permission", "WORKORDER_VIEW"))
-        {
-            // Can see all
-            return await query.ToListAsync();
-        }
-        else if (user.HasClaim("Permission", "WORKORDER_VIEW_TEAM"))
-        {
-            // Can see own + team
             if (userEquipeId.HasValue)
             {
-                query = query.Where(ot => 
-                    ot.TechnicienId == userId || 
+                query = query.Where(ot =>
+                    ot.TechnicienId == userId ||
                     ot.ResponsableId == userId ||
-                    (ot.Technicien != null && ot.Technicien.EquipeId == userEquipeId) ||
-                    (ot.Responsable != null && ot.Responsable.EquipeId == userEquipeId));
+                    (ot.Technicien != null && ot.Technicien.EquipeId == userEquipeId.Value) ||
+                    (ot.Responsable != null && ot.Responsable.EquipeId == userEquipeId.Value));
             }
             else
             {
                 query = query.Where(ot => ot.TechnicienId == userId || ot.ResponsableId == userId);
             }
+
             return await query.ToListAsync();
         }
-        else if (user.HasClaim("Permission", "WORKORDER_VIEW_OWN"))
+
+        if (scope == AccessScope.Own)
         {
-            // Can see own
             query = query.Where(ot => ot.TechnicienId == userId || ot.ResponsableId == userId);
             return await query.ToListAsync();
         }
 
-        // No permissions
-        return new System.Collections.Generic.List<OrdresTravail>();
+        return new List<OrdresTravail>();
     }
 }

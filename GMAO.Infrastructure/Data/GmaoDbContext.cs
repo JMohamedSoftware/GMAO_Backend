@@ -115,13 +115,20 @@ public class GmaoDbContext : DbContext
         modelBuilder.Entity<MouvementStock>()
             .HasQueryFilter(m => (_isSuperAdmin && !_isImpersonating) || (m.Piece != null && m.Piece.SocieteId == (_currentSocieteId ?? -1)));
 
+        modelBuilder.Entity<PlanPreventif>()
+            .HasQueryFilter(p => (_isSuperAdmin && !_isImpersonating) || (p.Equipement != null && p.Equipement.SocieteId == (_currentSocieteId ?? -1)));
+
+        modelBuilder.Entity<TachePreventive>()
+            .HasQueryFilter(t => (_isSuperAdmin && !_isImpersonating) || (t.Plan != null && t.Plan.Equipement != null && t.Plan.Equipement.SocieteId == (_currentSocieteId ?? -1)));
+
         modelBuilder.Entity<Document>()
             .HasQueryFilter(d => (_isSuperAdmin && !_isImpersonating)
                 || (d.SocieteId != null && d.SocieteId == (_currentSocieteId ?? -1))
                 || (d.SocieteId == null && (
                     (d.Equipement != null && d.Equipement.SocieteId == (_currentSocieteId ?? -1)) ||
                     (d.OT != null && d.OT.SocieteId == (_currentSocieteId ?? -1)) ||
-                    (d.Incident != null && d.Incident.SocieteId == (_currentSocieteId ?? -1)))));
+                    (d.Incident != null && d.Incident.SocieteId == (_currentSocieteId ?? -1)) ||
+                    (d.PlanPreventif != null && d.PlanPreventif.Equipement != null && d.PlanPreventif.Equipement.SocieteId == (_currentSocieteId ?? -1)))));
 
         // ── Relations Equipe ─────────────────────────────────────────────────
         modelBuilder.Entity<Equipe>()

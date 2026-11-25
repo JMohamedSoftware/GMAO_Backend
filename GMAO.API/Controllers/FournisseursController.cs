@@ -1,4 +1,6 @@
+using GMAO.API.Security;
 using GMAO.Application.Interfaces;
+using GMAO.Application.Security;
 using GMAO.Domain.Entities;
 using GMAO.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -24,32 +26,32 @@ public class FournisseursController : ControllerBase
     private int GetSocieteId() => _tenantContext.GetRequiredTenantId();
 
     [HttpGet]
+    [HasPermission(GmaoPermissions.SupplierView)]
     public async Task<IActionResult> GetAll()
     {
         var societeId = GetSocieteId();
-        var isSuperAdmin = User.IsInRole("SuperAdmin");
-        var hasTenantHeader = Request.Headers.ContainsKey("X-Tenant-Id");
-
-        IQueryable<Fournisseur> query = _context.Fournisseurs.AsNoTracking();
-
-        if (hasTenantHeader || !isSuperAdmin)
-        {
-            query = query.Where(f => f.SocieteId == societeId);
-        }
-
-        var fournisseurs = await query.OrderBy(f => f.Nom).ToListAsync();
+        var fournisseurs = await _context.Fournisseurs
+            .AsNoTracking()
+            .Where(f => f.SocieteId == societeId)
+            .OrderBy(f => f.Nom)
+            .ToListAsync();
         return Ok(fournisseurs);
     }
 
     [HttpGet("{id}")]
+    [HasPermission(GmaoPermissions.SupplierView)]
     public async Task<IActionResult> GetById(int id)
     {
-        var fournisseur = await _context.Fournisseurs.FindAsync(id);
+        var societeId = GetSocieteId();
+        var fournisseur = await _context.Fournisseurs
+            .AsNoTracking()
+            .FirstOrDefaultAsync(f => f.Id == id && f.SocieteId == societeId);
         if (fournisseur == null) return NotFound();
         return Ok(fournisseur);
     }
 
     [HttpPost]
+    [HasPermission(GmaoPermissions.SupplierCreate)]
     public async Task<IActionResult> Create([FromBody] Fournisseur fournisseur)
     {
         if (string.IsNullOrWhiteSpace(fournisseur.Nom))
@@ -57,13 +59,12 @@ public class FournisseursController : ControllerBase
 
         fournisseur.SocieteId = GetSocieteId();
 
-        // Ensure unique code per societe (and overall to avoid constraint issues)
         if (string.IsNullOrWhiteSpace(fournisseur.Code) ||
-            await _context.Fournisseurs.AnyAsync(f => f.Code == fournisseur.Code))
+            await _context.Fournisseurs.IgnoreQueryFilters().AnyAsync(f => f.Code == fournisseur.Code))
         {
             int count = await _context.Fournisseurs.CountAsync(f => f.SocieteId == fournisseur.SocieteId);
             string candidate = $"SUP-{fournisseur.SocieteId}-{count + 1:D3}";
-            while (await _context.Fournisseurs.AnyAsync(f => f.Code == candidate))
+            while (await _context.Fournisseurs.IgnoreQueryFilters().AnyAsync(f => f.Code == candidate))
             {
                 count++;
                 candidate = $"SUP-{fournisseur.SocieteId}-{count + 1:D3}";
@@ -79,11 +80,13 @@ public class FournisseursController : ControllerBase
     }
 
     [HttpPut("{id}")]
+    [HasPermission(GmaoPermissions.SupplierUpdate)]
     public async Task<IActionResult> Update(int id, [FromBody] Fournisseur fournisseur)
     {
         if (id != fournisseur.Id) return BadRequest();
-        
-        var existing = await _context.Fournisseurs.FirstOrDefaultAsync(f => f.Id == id);
+
+        var societeId = GetSocieteId();
+        var existing = await _context.Fournisseurs.FirstOrDefaultAsync(f => f.Id == id && f.SocieteId == societeId);
         if (existing == null) return NotFound();
 
         existing.Nom = fournisseur.Nom;
@@ -98,27 +101,25 @@ public class FournisseursController : ControllerBase
     }
 
     [HttpDelete("{id}")]
+    [HasPermission(GmaoPermissions.SupplierDelete)]
     public async Task<IActionResult> Delete(int id)
     {
+        var societeId = GetSocieteId();
         var fournisseur = await _context.Fournisseurs
             .Include(f => f.Equipements)
             .Include(f => f.Pieces)
-            .FirstOrDefaultAsync(f => f.Id == id);
+            .FirstOrDefaultAsync(f => f.Id == id && f.SocieteId == societeId);
 
         if (fournisseur == null) return NotFound();
 
         foreach (var eq in fournisseur.Equipements)
-        {
             eq.FournisseurId = null;
-        }
+
         foreach (var p in fournisseur.Pieces)
-        {
             p.FournisseurId = null;
-        }
 
         _context.Fournisseurs.Remove(fournisseur);
         await _context.SaveChangesAsync();
         return NoContent();
     }
 }
-

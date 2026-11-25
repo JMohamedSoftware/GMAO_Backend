@@ -1,8 +1,10 @@
 using System.Threading.Tasks;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
+using GMAO.API.Security;
+using GMAO.Application.Security;
 using GMAO.Domain.Entities;
 using GMAO.Domain.Interfaces;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace GMAO.API.Controllers;
 
@@ -19,6 +21,7 @@ public class FamillePiecesController : ControllerBase
     }
 
     [HttpGet]
+    [HasPermission(GmaoPermissions.InventoryView)]
     public async Task<IActionResult> GetAll()
     {
         var familles = await _repository.GetAllAsync();
@@ -26,6 +29,7 @@ public class FamillePiecesController : ControllerBase
     }
 
     [HttpGet("{id}")]
+    [HasPermission(GmaoPermissions.InventoryView)]
     public async Task<IActionResult> GetById(int id)
     {
         var famille = await _repository.GetByIdAsync(id);
@@ -34,8 +38,13 @@ public class FamillePiecesController : ControllerBase
     }
 
     [HttpPost]
+    [HasPermission(GmaoPermissions.InventoryCreate)]
     public async Task<IActionResult> Create([FromBody] FamillePiece famille)
     {
+        if (famille == null || string.IsNullOrWhiteSpace(famille.Nom))
+            return BadRequest(new { message = "Le nom de la famille de pièces est obligatoire." });
+
+        famille.Nom = famille.Nom.Trim();
         await _repository.AddAsync(famille);
         return CreatedAtAction(nameof(GetById), new { id = famille.Id }, famille);
     }

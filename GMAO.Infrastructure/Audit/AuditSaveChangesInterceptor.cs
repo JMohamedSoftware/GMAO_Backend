@@ -347,27 +347,38 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
                 item.NewValues[pkProp.Metadata.Name] = pkProp.CurrentValue;
             }
 
+            var resolvedSocieteId = item.EntitySocieteId ?? TryExtractSocieteId(item.Entry);
+            var societeName = item.Entry.Entity is Societe soc ? soc.Nom : null;
+            var changedProps = item.ChangedColumns.Count > 0 ? string.Join(",", item.ChangedColumns) : null;
+
             list.Add(new AuditTrailEntry
             {
                 UserId = item.UserId,
-                UserName = item.UserName,
-                UserRole = item.UserRole,
-                SocieteId = item.EntitySocieteId,
-                EntityName = item.TableName,
-                EntityId = pkVal,
-                Action = item.Action,
-                BusinessActionLabel = item.BusinessActionLabel,
+                UserName = Truncate(item.UserName, 150),
+                UserRole = Truncate(item.UserRole, 80),
+                SocieteId = resolvedSocieteId,
+                SocieteName = Truncate(societeName, 150),
+                EntityName = Truncate(item.TableName, 100) ?? "Unknown",
+                EntityId = Truncate(pkVal, 100) ?? "0",
+                Action = Truncate(item.Action, 40) ?? "UPDATE",
+                BusinessActionLabel = Truncate(item.BusinessActionLabel, 200) ?? "Operation",
                 TimestampUtc = item.TimestampUtc,
                 OldValuesJson = AuditSanitizer.SerializeSanitized(item.OldValues),
                 NewValuesJson = AuditSanitizer.SerializeSanitized(item.NewValues),
-                ChangedProperties = item.ChangedColumns.Count > 0 ? string.Join(",", item.ChangedColumns) : null,
-                TransactionId = batch.TransactionId,
-                CorrelationId = item.CorrelationId,
+                ChangedProperties = Truncate(changedProps, 1000),
+                TransactionId = Truncate(batch.TransactionId, 64),
+                CorrelationId = Truncate(item.CorrelationId, 128),
                 Source = "API_EF_INTERCEPTOR",
-                IpAddress = item.IpAddress
+                IpAddress = Truncate(item.IpAddress, 64)
             });
         }
         return list;
+    }
+
+    private static string? Truncate(string? value, int maxLength)
+    {
+        if (value == null) return null;
+        return value.Length <= maxLength ? value : value[..maxLength];
     }
 
     private ActorSnapshot ExtractActorMetadata()
@@ -465,6 +476,7 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         try
         {
             var conn = context.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open) return null;
             using var cmd = conn.CreateCommand();
             cmd.Transaction = context.Database.CurrentTransaction?.GetDbTransaction();
             cmd.CommandText = "SELECT pg_current_xact_id()::xid::text";
@@ -481,6 +493,7 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         try
         {
             var conn = context.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open) return null;
             await using var cmd = conn.CreateCommand();
             cmd.Transaction = context.Database.CurrentTransaction?.GetDbTransaction();
             cmd.CommandText = "SELECT pg_current_xact_id()::xid::text";

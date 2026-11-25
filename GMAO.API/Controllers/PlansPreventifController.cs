@@ -1,12 +1,15 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
+using System.Security.Claims;
+using GMAO.API.Security;
+using GMAO.Application.Interfaces;
+using GMAO.Application.Security;
+using GMAO.Domain.Constants;
 using GMAO.Domain.Entities;
 using GMAO.Domain.Enums;
 using GMAO.Domain.Interfaces;
-using GMAO.Application.Interfaces;
-using Microsoft.EntityFrameworkCore;
 using GMAO.Infrastructure.Data;
-using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace GMAO.API.Controllers;
 
@@ -20,13 +23,32 @@ public class PlansPreventifController : ControllerBase
     private readonly ITenantContextService _tenantContext;
 
     public PlansPreventifController(
-        GmaoDbContext context, 
+        GmaoDbContext context,
         IGenericRepository<OrdresTravail> otRepository,
         ITenantContextService tenantContext)
     {
         _context = context;
         _otRepository = otRepository;
         _tenantContext = tenantContext;
+    }
+
+    private int? ResolveScopedTenantId()
+    {
+        if (_tenantContext.IsSuperAdmin && !_tenantContext.IsImpersonating)
+            return null;
+
+        return _tenantContext.GetRequiredTenantId();
+    }
+
+    private IQueryable<PlanPreventif> ScopedPlansQuery()
+    {
+        var scopedTenantId = ResolveScopedTenantId();
+        var query = _context.PlansPreventifs.AsQueryable();
+        if (scopedTenantId.HasValue)
+        {
+            query = query.Where(p => p.Equipement != null && p.Equipement.SocieteId == scopedTenantId.Value);
+        }
+        return query;
     }
 
     private static DateTime? ToUtc(DateTime? d)
@@ -42,11 +64,14 @@ public class PlansPreventifController : ControllerBase
 
     // ── GET /api/PlansPreventif ───────────────────────────────────────────────
     [HttpGet]
+    [HasPermission(GmaoPermissions.PreventiveView)]
     public async Task<IActionResult> GetAll()
     {
-        var plans = await _context.PlansPreventifs
+        var plans = await ScopedPlansQuery()
+            .AsNoTracking()
             .Where(p => p.Actif)
             .Include(p => p.Equipement)
+            .ThenInclude(e => e.Famille)
             .Include(p => p.Taches)
             .OrderBy(p => p.ProchaineDate)
             .Select(p => new
@@ -79,11 +104,14 @@ public class PlansPreventifController : ControllerBase
 
     // ── GET /api/PlansPreventif/{id} ──────────────────────────────────────────
     [HttpGet("{id}")]
+    [HasPermission(GmaoPermissions.PreventiveView)]
     public async Task<IActionResult> GetById(int id)
     {
-        var plan = await _context.PlansPreventifs
+        var plan = await ScopedPlansQuery()
+            .AsNoTracking()
             .Where(p => p.Id == id)
             .Include(p => p.Equipement)
+            .ThenInclude(e => e.Famille)
             .Include(p => p.Taches)
             .Select(p => new
             {
@@ -116,16 +144,24 @@ public class PlansPreventifController : ControllerBase
 
     // ── POST /api/PlansPreventif ──────────────────────────────────────────────
     [HttpPost]
+    [HasPermission(GmaoPermissions.PreventiveCreate)]
     public async Task<IActionResult> Create([FromBody] CreatePlanRequest req)
     {
-        var tenantId = _tenantContext.GetRequiredTenantId();
-        var eqExists = await _context.Equipements.AnyAsync(e => e.Id == req.EquipementId && e.SocieteId == tenantId);
-        if (!eqExists) return BadRequest("L'équipement spécifié n'existe pas ou n'appartient pas à votre société.");
+        if (string.IsNullOrWhiteSpace(req.Titre))
+            return BadRequest(new { message = "Le titre du plan préventif est obligatoire." });
+
+        var scopedTenantId = ResolveScopedTenantId();
+        var equipement = await _context.Equipements
+            .AsNoTracking()
+            .FirstOrDefaultAsync(e => e.Id == req.EquipementId);
+
+        if (equipement == null || (scopedTenantId.HasValue && equipement.SocieteId != scopedTenantId.Value))
+            return BadRequest(new { message = "L'équipement spécifié n'existe pas ou n'appartient pas à votre société." });
 
         var plan = new PlanPreventif
         {
             EquipementId      = req.EquipementId,
-            Titre             = req.Titre,
+            Titre             = req.Titre.Trim(),
             Description       = req.Description,
             TypeDeclenchement = (TypeDeclenchement)req.TypeDeclenchement,
             Frequence         = req.Frequence,
@@ -135,10 +171,10 @@ public class PlansPreventifController : ControllerBase
             Actif             = true,
             Taches            = req.Taches?.Select((t, i) => new TachePreventive
             {
-                Description          = t.Description,
-                Ordre                = i + 1,
-                DureeEstimeeMinutes  = t.DureeEstimeeMinutes,
-                EstObligatoire       = t.EstObligatoire
+                Description         = t.Description,
+                Ordre               = i + 1,
+                DureeEstimeeMinutes = t.DureeEstimeeMinutes,
+                EstObligatoire      = t.EstObligatoire
             }).ToList() ?? new List<TachePreventive>()
         };
 
@@ -150,16 +186,30 @@ public class PlansPreventifController : ControllerBase
 
     // ── PUT /api/PlansPreventif/{id} ──────────────────────────────────────────
     [HttpPut("{id}")]
+    [HasPermission(GmaoPermissions.PreventiveUpdate)]
     public async Task<IActionResult> Update(int id, [FromBody] CreatePlanRequest req)
     {
-        var existing = await _context.PlansPreventifs
+        if (string.IsNullOrWhiteSpace(req.Titre))
+            return BadRequest(new { message = "Le titre du plan préventif est obligatoire." });
+
+        var scopedTenantId = ResolveScopedTenantId();
+        var existing = await ScopedPlansQuery()
+            .Include(p => p.Equipement)
             .Include(p => p.Taches)
             .FirstOrDefaultAsync(p => p.Id == id);
 
         if (existing == null) return NotFound();
 
+        var expectedTenantId = scopedTenantId ?? existing.Equipement.SocieteId;
+        var targetEq = await _context.Equipements
+            .AsNoTracking()
+            .FirstOrDefaultAsync(e => e.Id == req.EquipementId && e.SocieteId == expectedTenantId);
+
+        if (targetEq == null)
+            return BadRequest(new { message = "L'équipement cible n'existe pas ou n'appartient pas à la même société." });
+
         existing.EquipementId      = req.EquipementId;
-        existing.Titre             = req.Titre;
+        existing.Titre             = req.Titre.Trim();
         existing.Description       = req.Description;
         existing.TypeDeclenchement = (TypeDeclenchement)req.TypeDeclenchement;
         existing.Frequence         = req.Frequence;
@@ -167,7 +217,6 @@ public class PlansPreventifController : ControllerBase
         existing.DerniereDate      = ToUtc(req.DerniereDate);
         existing.ProchaineDate     = ToUtc(req.ProchaineDate);
 
-        // Replace taches
         _context.TachesPreventives.RemoveRange(existing.Taches);
         existing.Taches = req.Taches?.Select((t, i) => new TachePreventive
         {
@@ -183,9 +232,10 @@ public class PlansPreventifController : ControllerBase
 
     // ── DELETE /api/PlansPreventif/{id} (soft delete) ────────────────────────
     [HttpDelete("{id}")]
+    [HasPermission(GmaoPermissions.PreventiveDelete)]
     public async Task<IActionResult> Delete(int id)
     {
-        var plan = await _context.PlansPreventifs.FindAsync(id);
+        var plan = await ScopedPlansQuery().FirstOrDefaultAsync(p => p.Id == id);
         if (plan == null) return NotFound();
 
         plan.Actif = false;
@@ -198,24 +248,32 @@ public class PlansPreventifController : ControllerBase
     /// Génère un OT Préventif à partir d'un plan et reporte sa prochaine date.
     /// </summary>
     [HttpPost("{id}/generer-ot")]
+    [HasPermission(GmaoPermissions.PreventiveExecute)]
     public async Task<IActionResult> GenererOT(int id)
     {
-        var plan = await _context.PlansPreventifs
+        var scopedTenantId = ResolveScopedTenantId();
+        var plan = await ScopedPlansQuery()
             .Include(p => p.Equipement)
             .Include(p => p.Taches)
             .FirstOrDefaultAsync(p => p.Id == id);
 
         if (plan == null) return NotFound();
+        if (!plan.Actif)
+            return BadRequest(new { message = "Impossible de générer un OT à partir d'un plan préventif inactif." });
+        if (plan.Equipement == null)
+            return BadRequest(new { message = "L'équipement associé à ce plan est introuvable." });
 
-        // Calcul de la prochaine date selon la fréquence
+        int targetSocieteId = scopedTenantId ?? plan.Equipement.SocieteId;
+        if (plan.Equipement.SocieteId != targetSocieteId)
+            return Forbid();
+
         var now = DateTime.UtcNow;
-        bool isSaisonnier = plan.TypeDeclenchement == TypeDeclenchement.Saisonnier 
+        bool isSaisonnier = plan.TypeDeclenchement == TypeDeclenchement.Saisonnier
             || (plan.UniteMesure != null && (plan.UniteMesure.ToLower() == "saisonnier" || plan.UniteMesure.ToLower() == "hiver" || plan.UniteMesure.ToLower() == "printemps" || plan.UniteMesure.ToLower() == "été" || plan.UniteMesure.ToLower() == "ete" || plan.UniteMesure.ToLower() == "automne"));
 
         DateTime prochaine;
         if (isSaisonnier)
         {
-            // Saisonnier : prochaine intervention dans la prochaine saison (au moins 3 mois)
             prochaine = now.AddMonths(plan.Frequence > 0 ? plan.Frequence * 3 : 3);
         }
         else
@@ -231,69 +289,84 @@ public class PlansPreventifController : ControllerBase
         }
         DateTime prochaineUtc = ToUtc(prochaine) ?? DateTime.UtcNow.AddDays(30);
 
-        // Récupérer l'ID du responsable depuis le JWT
+        // Résoudre un responsable valide sans jamais supposer Id == 1
+        int? responsableId = null;
+        bool isSuperAdmin = User.IsInRole(GmaoRoles.SuperAdmin);
         var responsableIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        int responsableId = int.TryParse(responsableIdStr, out var rid) ? rid : 1;
+        if (int.TryParse(responsableIdStr, out var claimUserId) && claimUserId > 0)
+        {
+            var claimUserExists = await _context.Users.AsNoTracking()
+                .AnyAsync(u => u.Id == claimUserId && (u.SocieteId == targetSocieteId || isSuperAdmin));
+            if (claimUserExists)
+                responsableId = claimUserId;
+        }
 
-        // Gérer la description selon le type
+        if (!responsableId.HasValue)
+        {
+            responsableId = await _context.Users.AsNoTracking()
+                .Where(u => u.SocieteId == targetSocieteId && u.IsActive)
+                .OrderBy(u => u.RoleId)
+                .Select(u => (int?)u.Id)
+                .FirstOrDefaultAsync();
+        }
+
+        if (!responsableId.HasValue)
+            return BadRequest(new { message = "Aucun utilisateur responsable valide n'a pu être déterminé pour cet ordre de travail." });
+
+        var activeCampagne = await _context.Campagnes.AsNoTracking()
+            .Where(c => c.SocieteId == targetSocieteId && c.Etat == EtatCampagne.EnCours)
+            .OrderByDescending(c => c.DateDebut)
+            .FirstOrDefaultAsync();
+
         string descType = plan.TypeDeclenchement == TypeDeclenchement.Saisonnier || plan.UniteMesure?.ToLower() == "saisonnier"
             ? "Intervention saisonnière"
             : $"Fréquence: tous les {plan.Frequence} {plan.UniteMesure}";
 
-        // Déterminer la société
-        int targetSocieteId = _tenantContext.GetRequiredTenantId();
-        if (plan.Equipement != null && plan.Equipement.SocieteId != targetSocieteId && !User.IsInRole("SuperAdmin"))
-        {
-            return Forbid();
-        }
         int currentYear = now.Year;
-        string yearPrefix = $"OT-{currentYear}-";
-
-        var existingOts = await _context.OrdresTravail
+        string yearPrefix = $"OT-{currentYear}-S{targetSocieteId}-";
+        var existingNums = await _context.OrdresTravail
+            .IgnoreQueryFilters()
             .Where(o => o.SocieteId == targetSocieteId && o.NumeroOT.StartsWith(yearPrefix))
+            .Select(o => o.NumeroOT)
             .ToListAsync();
+
         int maxSeq = 0;
-        foreach (var o in existingOts)
+        foreach (var num in existingNums)
         {
-            if (!string.IsNullOrEmpty(o.NumeroOT))
-            {
-                var parts = o.NumeroOT.Split('-');
-                if (parts.Length >= 3 && int.TryParse(parts[^1], out int s) && s > maxSeq)
-                {
-                    maxSeq = s;
-                }
-            }
+            var parts = num.Split('-');
+            if (parts.Length >= 4 && int.TryParse(parts[^1], out int s) && s > maxSeq)
+                maxSeq = s;
         }
 
         int seq = maxSeq + 1;
         string candidate;
         do
         {
-            candidate = $"{yearPrefix}{seq}";
+            candidate = $"{yearPrefix}{seq:D3}";
             seq++;
-        } while (await _context.OrdresTravail.AnyAsync(o => o.SocieteId == targetSocieteId && o.NumeroOT == candidate));
+        } while (await _context.OrdresTravail.IgnoreQueryFilters().AnyAsync(o => o.NumeroOT == candidate));
 
         var ot = new OrdresTravail
         {
             NumeroOT        = candidate,
             SocieteId       = targetSocieteId,
             EquipementId    = plan.EquipementId,
-            ResponsableId   = responsableId,
+            ResponsableId   = responsableId.Value,
+            CampagneId      = activeCampagne?.Id,
             TypeMaintenance = TypeMaintenance.Preventive,
             Priorite        = PrioriteIntervention.Normale,
             Statut          = StatutOT.Planifie,
             DateCreation    = now,
-            DateDebutPrevue = now, // Demandé par le user : activé le jour même de la génération manuelle
-            DateFinPrevue   = now.AddDays(7), // Donner un délai logique par défaut (7 jours)
+            DateDebutPrevue = now,
+            DateFinPrevue   = now.AddDays(7),
             Description     = $"OT Préventif généré depuis le plan: {plan.Titre}. {descType}.",
             Instructions    = plan.Taches != null && plan.Taches.Any()
                 ? $"Plan préventif {plan.Id}\n\nTâches à réaliser:\n" + string.Join("\n", plan.Taches.OrderBy(t => t.Ordre).Select(t => $"• {t.Description}" + (t.DureeEstimeeMinutes.HasValue ? $" ({t.DureeEstimeeMinutes} min)" : "")))
-                : $"Plan préventif {plan.Id} — Équipement: {plan.Equipement?.Designation}"
+                : $"Plan préventif {plan.Id} — Équipement: {plan.Equipement.Designation}"
         };
 
         await _otRepository.AddAsync(ot);
 
-        // Mise à jour du plan
         plan.DerniereDate  = now;
         plan.ProchaineDate = prochaineUtc;
         await _context.SaveChangesAsync();
@@ -308,9 +381,13 @@ public class PlansPreventifController : ControllerBase
 
     // ── PUT /api/PlansPreventif/{id}/replanifier ──────────────────────────────
     [HttpPut("{id}/replanifier")]
+    [HasPermission(GmaoPermissions.PreventiveUpdate)]
     public async Task<IActionResult> Replanifier(int id, [FromBody] ReplanifierRequest req)
     {
-        var plan = await _context.PlansPreventifs.FindAsync(id);
+        if (req.NouvelleDate == default)
+            return BadRequest(new { message = "La nouvelle date est invalide." });
+
+        var plan = await ScopedPlansQuery().FirstOrDefaultAsync(p => p.Id == id && p.Actif);
         if (plan == null) return NotFound();
 
         plan.ProchaineDate = ToUtc(req.NouvelleDate);
@@ -326,7 +403,7 @@ public class CreatePlanRequest
     public int EquipementId { get; set; }
     public string Titre { get; set; } = string.Empty;
     public string? Description { get; set; }
-    public int TypeDeclenchement { get; set; }    // 1=Periodique, 2=Compteur, 3=Saisonnier
+    public int TypeDeclenchement { get; set; }
     public int Frequence { get; set; }
     public string? UniteMesure { get; set; }
     public DateTime? DerniereDate { get; set; }

@@ -1,15 +1,19 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.EntityFrameworkCore;
+using GMAO.API.Security;
+using GMAO.Application.Interfaces;
+using GMAO.Application.Security;
+using GMAO.Domain.Constants;
 using GMAO.Domain.Entities;
 using GMAO.Domain.Enums;
 using GMAO.Domain.Interfaces;
-using GMAO.Application.Interfaces;
 using GMAO.Infrastructure.Data;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace GMAO.API.Controllers;
 
@@ -18,6 +22,19 @@ namespace GMAO.API.Controllers;
 [Authorize]
 public class OrdresTravailController : ControllerBase
 {
+    private static readonly IReadOnlyDictionary<StatutOT, StatutOT[]> AllowedTransitions =
+        new Dictionary<StatutOT, StatutOT[]>
+        {
+            [StatutOT.Cree]        = new[] { StatutOT.Planifie, StatutOT.AffecteChef, StatutOT.EnCours, StatutOT.Suspendu, StatutOT.Annule },
+            [StatutOT.AffecteChef] = new[] { StatutOT.Planifie, StatutOT.EnCours, StatutOT.Suspendu, StatutOT.Annule },
+            [StatutOT.Planifie]    = new[] { StatutOT.EnCours, StatutOT.AffecteChef, StatutOT.Suspendu, StatutOT.Annule },
+            [StatutOT.EnCours]     = new[] { StatutOT.Planifie, StatutOT.Suspendu, StatutOT.Termine, StatutOT.Cloture, StatutOT.Annule },
+            [StatutOT.Suspendu]    = new[] { StatutOT.EnCours, StatutOT.Planifie, StatutOT.Annule },
+            [StatutOT.Termine]     = new[] { StatutOT.EnCours, StatutOT.Cloture },
+            [StatutOT.Cloture]     = Array.Empty<StatutOT>(),
+            [StatutOT.Annule]      = Array.Empty<StatutOT>()
+        };
+
     private readonly IGenericRepository<OrdresTravail> _repository;
     private readonly IGenericRepository<DemandeIntervention> _incidentRepository;
     private readonly GmaoDbContext _context;
@@ -39,8 +56,8 @@ public class OrdresTravailController : ControllerBase
 
     private int GetCurrentUserId()
     {
-        var claim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value 
-            ?? User.FindFirst("id")?.Value 
+        var claim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? User.FindFirst("id")?.Value
             ?? User.FindFirst("sub")?.Value;
         return int.TryParse(claim, out int uid) ? uid : 0;
     }
@@ -57,6 +74,7 @@ public class OrdresTravailController : ControllerBase
     }
 
     [HttpGet]
+    [HasPermission(GmaoPermissions.WorkOrderView)]
     public async Task<IActionResult> GetAll()
     {
         int societeId = GetSocieteId();
@@ -66,41 +84,38 @@ public class OrdresTravailController : ControllerBase
             .AsNoTracking()
             .Include(o => o.Campagne)
             .Include(o => o.Technicien)
-            .Include(o => o.Responsable)
+            .Include(o => o.Intervention)
+            .Include(o => o.MouvementsStock)
+                .ThenInclude(m => m.Piece)
             .Where(o => o.SocieteId == societeId);
 
-        // RBAC Scoping
-        bool isFullAccess = User.IsInRole("SuperAdmin") || 
-                            User.IsInRole("Administrateur") || 
-                            User.IsInRole("CompanyAdmin") ||
-                            User.HasClaim("Permission", "WORKORDER_VIEW_ALL") ||
-                            User.HasClaim("Permission", "WORKORDER_VIEW");
+        var scope = GmaoPermissions.GetScope(User, GmaoPermissions.WorkOrderView);
+        if (scope == AccessScope.None)
+            return Forbid();
 
-        if (!isFullAccess)
+        if (scope == AccessScope.Team)
         {
-            if (User.HasClaim("Permission", "WORKORDER_VIEW_TEAM"))
-            {
-                var currentUser = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == currentUserId);
-                int? teamId = currentUser?.EquipeId;
+            int? teamId = await _context.Users.AsNoTracking()
+                .Where(u => u.Id == currentUserId && u.SocieteId == societeId)
+                .Select(u => u.EquipeId)
+                .FirstOrDefaultAsync();
 
-                if (teamId.HasValue)
-                {
-                    query = query.Where(ot => 
-                        ot.TechnicienId == currentUserId || 
-                        ot.ResponsableId == currentUserId ||
-                        (ot.Technicien != null && ot.Technicien.EquipeId == teamId.Value) ||
-                        (ot.Responsable != null && ot.Responsable.EquipeId == teamId.Value));
-                }
-                else
-                {
-                    query = query.Where(ot => ot.TechnicienId == currentUserId || ot.ResponsableId == currentUserId);
-                }
+            if (teamId.HasValue)
+            {
+                query = query.Where(ot =>
+                    ot.TechnicienId == currentUserId ||
+                    ot.ResponsableId == currentUserId ||
+                    (ot.Technicien != null && ot.Technicien.EquipeId == teamId.Value) ||
+                    (ot.Responsable != null && ot.Responsable.EquipeId == teamId.Value));
             }
             else
             {
-                // Default / WORKORDER_VIEW_OWN: only see own work orders
                 query = query.Where(ot => ot.TechnicienId == currentUserId || ot.ResponsableId == currentUserId);
             }
+        }
+        else if (scope == AccessScope.Own)
+        {
+            query = query.Where(ot => ot.TechnicienId == currentUserId || ot.ResponsableId == currentUserId);
         }
 
         var ordres = await query.ToListAsync();
@@ -108,6 +123,7 @@ public class OrdresTravailController : ControllerBase
     }
 
     [HttpGet("{id}")]
+    [HasPermission(GmaoPermissions.WorkOrderView)]
     public async Task<IActionResult> GetById(int id)
     {
         int societeId = GetSocieteId();
@@ -117,98 +133,111 @@ public class OrdresTravailController : ControllerBase
             .AsNoTracking()
             .Include(o => o.Campagne)
             .Include(o => o.Technicien)
-            .Include(o => o.Responsable)
+            .Include(o => o.Intervention)
+            .Include(o => o.MouvementsStock)
+                .ThenInclude(m => m.Piece)
             .FirstOrDefaultAsync(o => o.Id == id && o.SocieteId == societeId);
 
         if (ordre == null) return NotFound();
 
-        // RBAC Scope Check
-        bool isFullAccess = User.IsInRole("SuperAdmin") || 
-                            User.IsInRole("Administrateur") || 
-                            User.IsInRole("CompanyAdmin") ||
-                            User.HasClaim("Permission", "WORKORDER_VIEW_ALL") ||
-                            User.HasClaim("Permission", "WORKORDER_VIEW");
+        var scope = GmaoPermissions.GetScope(User, GmaoPermissions.WorkOrderView);
+        if (scope == AccessScope.None)
+            return Forbid();
 
-        if (!isFullAccess)
+        if (scope == AccessScope.Team)
         {
-            if (User.HasClaim("Permission", "WORKORDER_VIEW_TEAM"))
-            {
-                var currentUser = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == currentUserId);
-                int? teamId = currentUser?.EquipeId;
-                bool isUserTeam = teamId.HasValue && (
-                    (ordre.Technicien != null && ordre.Technicien.EquipeId == teamId.Value) ||
-                    (ordre.Responsable != null && ordre.Responsable.EquipeId == teamId.Value));
+            int? teamId = await _context.Users.AsNoTracking()
+                .Where(u => u.Id == currentUserId && u.SocieteId == societeId)
+                .Select(u => u.EquipeId)
+                .FirstOrDefaultAsync();
 
-                if (ordre.TechnicienId != currentUserId && ordre.ResponsableId != currentUserId && !isUserTeam)
-                {
-                    return Forbid();
-                }
-            }
-            else if (ordre.TechnicienId != currentUserId && ordre.ResponsableId != currentUserId)
-            {
+            bool isUserTeam = teamId.HasValue && (
+                (ordre.Technicien != null && ordre.Technicien.EquipeId == teamId.Value) ||
+                (ordre.Responsable != null && ordre.Responsable.EquipeId == teamId.Value));
+
+            if (ordre.TechnicienId != currentUserId && ordre.ResponsableId != currentUserId && !isUserTeam)
                 return Forbid();
-            }
+        }
+        else if (scope == AccessScope.Own)
+        {
+            if (ordre.TechnicienId != currentUserId && ordre.ResponsableId != currentUserId)
+                return Forbid();
         }
 
         return Ok(ordre);
     }
 
     /// <summary>
-    /// Creates a new work order. Auto-generates a clean sequential NumeroOT
-    /// (e.g. OT-2026-S1-001) scoped to the company and globally collision-free.
-    /// If demandeId is provided, safely handles already existing OTs and
-    /// auto-transitions the incident to TransformeeEnOT.
+    /// Creates a new work order with strict tenant validation, collision-free NumeroOT generation,
+    /// active campaign association, and incident status synchronization.
     /// </summary>
     [HttpPost]
+    [HasPermission(GmaoPermissions.WorkOrderCreate)]
     public async Task<IActionResult> Create([FromBody] OrdresTravail ordre)
     {
         int societeId = GetSocieteId();
         ordre.SocieteId = societeId;
 
-        // If DemandeId already has an OT in the database, return it instead of failing on unique constraint
+        if (ordre.EquipementId <= 0)
+            return BadRequest("L'équipement associé à l'ordre de travail est obligatoire.");
+
+        var equipement = await _context.Equipements
+            .FirstOrDefaultAsync(e => e.Id == ordre.EquipementId && e.SocieteId == societeId);
+        if (equipement == null)
+            return BadRequest("L'équipement spécifié n'existe pas ou n'appartient pas à votre société.");
+
+        if (ordre.ResponsableId <= 0)
+        {
+            int currentUserId = GetCurrentUserId();
+            if (currentUserId > 0)
+                ordre.ResponsableId = currentUserId;
+        }
+
         if (ordre.DemandeId.HasValue && ordre.DemandeId.Value > 0)
         {
+            var incident = await _context.DemandesIntervention
+                .FirstOrDefaultAsync(d => d.Id == ordre.DemandeId.Value && d.SocieteId == societeId);
+            if (incident == null)
+                return BadRequest("La demande d'intervention référencée est introuvable dans votre société.");
+
             var existingForDemande = await _context.OrdresTravail
                 .FirstOrDefaultAsync(o => o.DemandeId == ordre.DemandeId.Value && o.SocieteId == societeId);
             if (existingForDemande != null)
-            {
                 return Ok(existingForDemande);
-            }
         }
 
-        // Auto-generate clean sequential NumeroOT per company and per year (OT-YYYY-0001, OT-YYYY-0002, ...)
         int currentYear = DateTime.UtcNow.Year;
-        string yearPrefix = $"OT-{currentYear}-";
+        string yearPrefix = $"OT-{currentYear}-S{societeId}-";
 
-        var existingOts = await _context.OrdresTravail
+        var existingNums = await _context.OrdresTravail
+            .IgnoreQueryFilters()
             .Where(o => o.SocieteId == societeId && o.NumeroOT.StartsWith(yearPrefix))
+            .Select(o => o.NumeroOT)
             .ToListAsync();
+
         int maxSeq = 0;
-        foreach (var o in existingOts)
+        foreach (var num in existingNums)
         {
-            if (!string.IsNullOrEmpty(o.NumeroOT))
-            {
-                var parts = o.NumeroOT.Split('-');
-                if (parts.Length >= 3 && int.TryParse(parts[^1], out int s) && s > maxSeq)
-                {
-                    maxSeq = s;
-                }
-            }
+            var parts = num.Split('-');
+            if (parts.Length >= 4 && int.TryParse(parts[^1], out int s) && s > maxSeq)
+                maxSeq = s;
         }
 
-        // Generate a collision-free NumeroOT for this company (e.g. OT-2026-1, OT-2026-2)
         int seq = maxSeq + 1;
         string candidate;
         do
         {
-            candidate = $"{yearPrefix}{seq}";
+            candidate = $"{yearPrefix}{seq:D3}";
             seq++;
-        } while (await _context.OrdresTravail.AnyAsync(o => o.SocieteId == societeId && o.NumeroOT == candidate));
+        } while (await _context.OrdresTravail.IgnoreQueryFilters().AnyAsync(o => o.NumeroOT == candidate));
 
         ordre.NumeroOT = candidate;
         ordre.DateCreation = DateTime.UtcNow;
+        ordre.DateDebutPrevue = ToUtc(ordre.DateDebutPrevue);
+        ordre.DateFinPrevue = ToUtc(ordre.DateFinPrevue);
+        ordre.DateDebutReelle = ToUtc(ordre.DateDebutReelle);
+        ordre.DateFinReelle = ToUtc(ordre.DateFinReelle);
 
-        // Auto-assigner la CampagneId active de l'entreprise si non spécifiée
         if (!ordre.CampagneId.HasValue || ordre.CampagneId.Value <= 0)
         {
             var activeCampagneId = await _context.Campagnes
@@ -229,9 +258,15 @@ public class OrdresTravailController : ControllerBase
             ordre.CampagneId = activeCampagneId;
         }
 
+        if (ordre.Intervention != null)
+        {
+            ordre.Intervention.DateIntervention = DateTime.UtcNow;
+            ordre.Intervention.DateDebut = ToUtc(ordre.Intervention.DateDebut);
+            ordre.Intervention.DateFin = ToUtc(ordre.Intervention.DateFin);
+        }
+
         await _repository.AddAsync(ordre);
 
-        // Auto-transition the linked incident to "Transformée en OT"
         if (ordre.DemandeId.HasValue)
         {
             var incident = await _incidentRepository.GetByIdAsync(ordre.DemandeId.Value);
@@ -242,83 +277,97 @@ public class OrdresTravailController : ControllerBase
             }
         }
 
-        // Auto-update equipment status: if Corrective or high/urgent priority, mark as EnPanne
-        if (ordre.EquipementId > 0 && (ordre.TypeMaintenance == TypeMaintenance.Corrective || (int)ordre.Priorite >= (int)PrioriteIntervention.Haute))
+        if (ordre.TypeMaintenance == TypeMaintenance.Corrective || (int)ordre.Priorite >= (int)PrioriteIntervention.Haute)
         {
-            var equipement = await _context.Equipements.FirstOrDefaultAsync(e => e.Id == ordre.EquipementId && e.SocieteId == societeId);
-            if (equipement != null)
-            {
-                equipement.Etat = EtatEquipement.EnPanne;
-                equipement.UpdatedAt = DateTime.UtcNow;
-                await _context.SaveChangesAsync();
-            }
+            equipement.Etat = EtatEquipement.EnPanne;
+            equipement.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
         }
 
         return CreatedAtAction(nameof(GetById), new { id = ordre.Id }, ordre);
     }
 
     /// <summary>
-    /// Updates a work order. Validates OT State Machine transitions and permissions:
-    /// - Terminal states (Cloture, Annule) cannot be mutated unless SuperAdmin.
-    /// - Transitioning to Cloture (6) requires managerial authorization.
-    /// - Real start/end dates follow lifecycle.
-    /// - Equipment status is automatically updated according to OT lifecycle.
+    /// Updates a work order, strictly enforcing RBAC scopes, valid OT state transitions,
+    /// administrative closure rules, equipment status synchronization, and Intervention persistence.
     /// </summary>
     [HttpPut("{id}")]
+    [HasPermission(
+        GmaoPermissions.WorkOrderUpdate,
+        GmaoPermissions.WorkOrderExecute,
+        GmaoPermissions.WorkOrderStart,
+        GmaoPermissions.WorkOrderSuspend,
+        GmaoPermissions.WorkOrderFinish,
+        GmaoPermissions.WorkOrderClose,
+        GmaoPermissions.WorkOrderAssign)]
     public async Task<IActionResult> Update(int id, [FromBody] OrdresTravail ordre)
     {
         if (id != ordre.Id) return BadRequest("L'id dans l'URL ne correspond pas au corps.");
 
         int societeId = GetSocieteId();
+        int currentUserId = GetCurrentUserId();
+
         var existing = await _context.OrdresTravail
+            .Include(o => o.Intervention)
             .FirstOrDefaultAsync(o => o.Id == id && o.SocieteId == societeId);
         if (existing == null) return NotFound();
 
-        // ── WORK ORDER STATE MACHINE VALIDATION ────────────────────────────
+        if (!CanModifyWorkOrder(existing, currentUserId, societeId))
+            return Forbid();
+
+        if (ordre.EquipementId > 0 && ordre.EquipementId != existing.EquipementId)
+        {
+            var eqExists = await _context.Equipements.AsNoTracking()
+                .AnyAsync(e => e.Id == ordre.EquipementId && e.SocieteId == societeId);
+            if (!eqExists)
+                return BadRequest("L'équipement cible n'existe pas ou n'appartient pas à votre société.");
+        }
+
         var currentStatut = existing.Statut;
         var targetStatut = ordre.Statut;
 
         if (currentStatut != targetStatut)
         {
-            // 1. Guard against modifications from terminal states
-            if (currentStatut == StatutOT.Cloture && !User.IsInRole("SuperAdmin"))
-            {
-                return Conflict("Un ordre de travail clôturé ne peut plus changer de statut.");
-            }
-            if (currentStatut == StatutOT.Annule && !User.IsInRole("SuperAdmin"))
-            {
-                return Conflict("Un ordre de travail annulé ne peut plus changer de statut.");
-            }
+            bool isSuperAdmin = User.IsInRole(GmaoRoles.SuperAdmin);
 
-            // 2. Guard for Clôture administrative (StatutOT.Cloture = 6)
+            if (currentStatut == StatutOT.Cloture && !isSuperAdmin)
+                return Conflict("Un ordre de travail clôturé ne peut plus changer de statut.");
+
+            if (currentStatut == StatutOT.Annule && !isSuperAdmin)
+                return Conflict("Un ordre de travail annulé ne peut plus changer de statut.");
+
             if (targetStatut == StatutOT.Cloture)
             {
-                bool canClose = User.IsInRole("SuperAdmin") ||
-                                User.IsInRole("Administrateur") ||
-                                User.IsInRole("CompanyAdmin") ||
-                                User.IsInRole("ResponsableMaintenance") ||
-                                User.HasClaim("Permission", "WORKORDER_CLOSE") ||
-                                User.HasClaim("Permission", "WORKORDER_UPDATE_ALL");
+                bool canClose = GmaoRoles.IsManagerial(User) ||
+                                GmaoPermissions.HasPermission(User, GmaoPermissions.WorkOrderClose) ||
+                                GmaoPermissions.GetScope(User, GmaoPermissions.WorkOrderUpdate) == AccessScope.All;
 
                 if (!canClose)
-                {
                     return Forbid();
-                }
 
-                if (currentStatut != StatutOT.Termine && currentStatut != StatutOT.EnCours && !User.IsInRole("SuperAdmin"))
-                {
+                if (currentStatut != StatutOT.Termine && currentStatut != StatutOT.EnCours && !isSuperAdmin)
                     return Conflict("Un ordre de travail doit être au moins en cours ou terminé avant d'être clôturé administrativement.");
-                }
             }
 
-            // 3. Guard: From Termine (5), only allowed transitions are Cloture (6) or Reopen to EnCours (3)
-            if (currentStatut == StatutOT.Termine && targetStatut != StatutOT.Cloture && targetStatut != StatutOT.EnCours && !User.IsInRole("SuperAdmin"))
+            if (targetStatut == StatutOT.Annule && !isSuperAdmin)
             {
-                return Conflict("Un ordre de travail terminé ne peut être que clôturé ou réouvert pour ré-intervention.");
+                bool canCancel = GmaoRoles.IsManagerial(User) ||
+                                 GmaoPermissions.HasPermission(User, GmaoPermissions.WorkOrderDelete) ||
+                                 GmaoPermissions.HasPermission(User, GmaoPermissions.WorkOrderClose);
+                if (!canCancel)
+                    return Forbid();
+            }
+
+            if (!isSuperAdmin)
+            {
+                if (currentStatut == StatutOT.Termine && targetStatut != StatutOT.Cloture && targetStatut != StatutOT.EnCours)
+                    return Conflict("Un ordre de travail terminé ne peut être que clôturé ou réouvert pour ré-intervention.");
+
+                if (!AllowedTransitions.TryGetValue(currentStatut, out var validTargets) || !validTargets.Contains(targetStatut))
+                    return Conflict($"Transition de statut invalide : {currentStatut} vers {targetStatut}.");
             }
         }
 
-        // Patch only scalar/value properties
         if (string.IsNullOrWhiteSpace(existing.NumeroOT) &&
             !string.IsNullOrWhiteSpace(ordre.NumeroOT) && ordre.NumeroOT.Length <= 30)
         {
@@ -342,21 +391,48 @@ public class OrdresTravailController : ControllerBase
         existing.CoutSousTraitance = ordre.CoutSousTraitance ?? existing.CoutSousTraitance;
         existing.CampagneId        = ordre.CampagneId ?? existing.CampagneId;
 
-        // Real start / end dates follow lifecycle
         if (existing.Statut == StatutOT.EnCours && existing.DateDebutReelle == null)
             existing.DateDebutReelle = DateTime.UtcNow;
         if ((existing.Statut == StatutOT.Termine || existing.Statut == StatutOT.Cloture) && existing.DateFinReelle == null)
             existing.DateFinReelle = DateTime.UtcNow;
 
-        // Npgsql timestamptz requires UTC DateTime
         existing.DateDebutPrevue = ToUtc(existing.DateDebutPrevue);
         existing.DateFinPrevue   = ToUtc(existing.DateFinPrevue);
         existing.DateDebutReelle = ToUtc(existing.DateDebutReelle);
         existing.DateFinReelle   = ToUtc(existing.DateFinReelle);
 
+        if (ordre.Intervention != null)
+        {
+            existing.Intervention ??= new Intervention
+            {
+                OTId = existing.Id,
+                DateIntervention = DateTime.UtcNow
+            };
+
+            if (ordre.Intervention.Diagnostic != null)
+                existing.Intervention.Diagnostic = ordre.Intervention.Diagnostic;
+            if (ordre.Intervention.CausePanne != null)
+                existing.Intervention.CausePanne = ordre.Intervention.CausePanne;
+            if (ordre.Intervention.Solution != null)
+                existing.Intervention.Solution = ordre.Intervention.Solution;
+            if (ordre.Intervention.Observation != null)
+                existing.Intervention.Observation = ordre.Intervention.Observation;
+            if (ordre.Intervention.TempsPasse.HasValue)
+                existing.Intervention.TempsPasse = ordre.Intervention.TempsPasse;
+
+            existing.Intervention.DateDebut = ToUtc(ordre.Intervention.DateDebut) ?? existing.DateDebutReelle;
+            existing.Intervention.DateFin   = ToUtc(ordre.Intervention.DateFin) ?? existing.DateFinReelle;
+            existing.Intervention.Statut    = existing.Statut switch
+            {
+                StatutOT.EnCours  => StatutIntervention.EnCours,
+                StatutOT.Suspendu => StatutIntervention.Suspendue,
+                StatutOT.Termine or StatutOT.Cloture => StatutIntervention.Terminee,
+                _ => existing.Intervention.Statut
+            };
+        }
+
         await _context.SaveChangesAsync();
 
-        // Auto-update linked equipment status according to OT lifecycle
         if (existing.EquipementId > 0)
         {
             var equipement = await _context.Equipements.FirstOrDefaultAsync(e => e.Id == existing.EquipementId && e.SocieteId == societeId);
@@ -368,7 +444,7 @@ public class OrdresTravailController : ControllerBase
                     equipement.UpdatedAt = DateTime.UtcNow;
                     await _context.SaveChangesAsync();
                 }
-                else if (existing.Statut == StatutOT.Termine || existing.Statut == StatutOT.Cloture)
+                else if (existing.Statut == StatutOT.Termine || existing.Statut == StatutOT.Cloture || existing.Statut == StatutOT.Annule)
                 {
                     equipement.Etat = EtatEquipement.EnService;
                     equipement.UpdatedAt = DateTime.UtcNow;
@@ -377,7 +453,6 @@ public class OrdresTravailController : ControllerBase
             }
         }
 
-        // Auto-close linked incident when OT is completed or closed
         if ((existing.Statut == StatutOT.Termine || existing.Statut == StatutOT.Cloture) && existing.DemandeId.HasValue && existing.DemandeId.Value > 0)
         {
             var incident = await _context.DemandesIntervention.FirstOrDefaultAsync(d => d.Id == existing.DemandeId.Value && d.SocieteId == societeId);
@@ -392,6 +467,7 @@ public class OrdresTravailController : ControllerBase
     }
 
     [HttpDelete("{id}")]
+    [HasPermission(GmaoPermissions.WorkOrderDelete)]
     public async Task<IActionResult> Delete(int id)
     {
         int societeId = GetSocieteId();
@@ -399,8 +475,59 @@ public class OrdresTravailController : ControllerBase
             .FirstOrDefaultAsync(o => o.Id == id && o.SocieteId == societeId);
         if (ordre == null) return NotFound();
 
+        if (ordre.Statut == StatutOT.Cloture && !User.IsInRole(GmaoRoles.SuperAdmin))
+            return Conflict("Un ordre de travail clôturé ne peut pas être supprimé.");
+
         _context.OrdresTravail.Remove(ordre);
         await _context.SaveChangesAsync();
         return NoContent();
+    }
+
+    private bool CanModifyWorkOrder(OrdresTravail existing, int currentUserId, int societeId)
+    {
+        if (GmaoRoles.IsCompanyAdmin(User) || GmaoRoles.IsManagerial(User))
+            return true;
+
+        var updateScope = GmaoPermissions.GetScope(User, GmaoPermissions.WorkOrderUpdate);
+        if (updateScope == AccessScope.All || GmaoPermissions.HasPermission(User, GmaoPermissions.WorkOrderClose))
+            return true;
+
+        if (updateScope == AccessScope.Team)
+        {
+            if (existing.TechnicienId == currentUserId || existing.ResponsableId == currentUserId)
+                return true;
+
+            int? teamId = _context.Users.AsNoTracking()
+                .Where(u => u.Id == currentUserId && u.SocieteId == societeId)
+                .Select(u => u.EquipeId)
+                .FirstOrDefault();
+
+            if (teamId.HasValue)
+            {
+                bool techInTeam = existing.TechnicienId.HasValue && _context.Users.AsNoTracking()
+                    .Any(u => u.Id == existing.TechnicienId.Value && u.EquipeId == teamId.Value);
+                bool respInTeam = existing.ResponsableId > 0 && _context.Users.AsNoTracking()
+                    .Any(u => u.Id == existing.ResponsableId && u.EquipeId == teamId.Value);
+                if (techInTeam || respInTeam)
+                    return true;
+            }
+
+            // Un chef d'équipe peut prendre en charge / planifier un OT encore non affecté à un technicien
+            if (existing.TechnicienId == null && (existing.Statut == StatutOT.Cree || existing.Statut == StatutOT.AffecteChef))
+                return true;
+
+            return false;
+        }
+
+        // Scope OWN ou permissions d'exécution technicien
+        bool hasExecPerm = GmaoPermissions.HasPermission(User, GmaoPermissions.WorkOrderExecute) ||
+                           GmaoPermissions.HasPermission(User, GmaoPermissions.WorkOrderStart) ||
+                           GmaoPermissions.HasPermission(User, GmaoPermissions.WorkOrderSuspend) ||
+                           GmaoPermissions.HasPermission(User, GmaoPermissions.WorkOrderFinish);
+
+        if (updateScope == AccessScope.Own || hasExecPerm)
+            return existing.TechnicienId == currentUserId || existing.ResponsableId == currentUserId;
+
+        return false;
     }
 }

@@ -127,17 +127,15 @@ public class DocumentController : ControllerBase
 
     private bool HasUploadPermission()
     {
-        return User.IsInRole("SuperAdmin")
-            || User.IsInRole("Administrateur")
-            || User.IsInRole("CompanyAdmin")
-            || User.IsInRole("ResponsableMaintenance")
-            || User.IsInRole("ChefEquipe")
-            || User.IsInRole("Technicien")
-            || User.HasClaim("Permission", "EQUIPMENT_UPDATE")
-            || User.HasClaim("Permission", "WORKORDER_UPDATE_ALL")
-            || User.HasClaim("Permission", "WORKORDER_UPDATE_TEAM")
-            || User.HasClaim("Permission", "WORKORDER_UPDATE_OWN")
-            || User.HasClaim("Permission", "INCIDENTS_CREATE");
+        return User.IsInRole(GMAO.Domain.Constants.GmaoRoles.SuperAdmin)
+            || User.IsInRole(GMAO.Domain.Constants.GmaoRoles.Administrateur)
+            || User.IsInRole(GMAO.Domain.Constants.GmaoRoles.ResponsableMaintenance)
+            || User.IsInRole(GMAO.Domain.Constants.GmaoRoles.ChefEquipe)
+            || User.IsInRole(GMAO.Domain.Constants.GmaoRoles.Technicien)
+            || GMAO.Application.Security.GmaoPermissions.HasPermission(User, GMAO.Application.Security.GmaoPermissions.EquipmentUpdate)
+            || GMAO.Application.Security.GmaoPermissions.HasPermission(User, GMAO.Application.Security.GmaoPermissions.WorkOrderUpdate)
+            || GMAO.Application.Security.GmaoPermissions.HasPermission(User, GMAO.Application.Security.GmaoPermissions.IncidentCreate)
+            || GMAO.Application.Security.GmaoPermissions.HasPermission(User, GMAO.Application.Security.GmaoPermissions.PreventiveUpdate);
     }
 
     [HttpGet("equipement/{equipementId}")]
